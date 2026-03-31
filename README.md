@@ -2,19 +2,17 @@
 
 ## 1. Project Overview
 
-This project builds a cloud-based data science / machine learning application using the Titanic dataset. It fulfills the three assignment objectives: a data pipeline, a machine learning pipeline, and API access. The assignment also requires the data pipeline to be scheduled every 3 minutes, the ML pipeline to use two algorithms with a 70/30 train-test split, and the model monitoring section to log at least four metrics. 
+This project implements a cloud-based data science / machine learning application using the Titanic dataset. It satisfies the assignment requirements by providing: a data pipeline for ingestion, preprocessing, EDA, and monitoring; a machine learning pipeline for model training and evaluation; and an API layer to retrieve application details. The assignment requires the data workflow to run every 3 minutes, the ML pipeline to use two algorithms with a 70/30 split, and the model monitoring section to log at least four metrics. 
 
-## 2. What This Project Does
+## 2. Business Problem
 
-* Ingests the Titanic dataset from a local `data/` folder
-* Cleans and preprocesses the dataset
-* Performs exploratory data analysis and saves charts in `plots/`
-* Runs the data pipeline on a 3-minute schedule through Prefect Cloud
-* Trains and evaluates two machine learning models
-* Logs metrics and artifacts to MLflow
-* Exposes application details through a FastAPI endpoint
+The business objective is to predict whether a Titanic passenger survived based on passenger features such as class, sex, age, family structure, fare, and embarkation port. This is a classification problem and is suitable for comparing multiple supervised learning models.
 
-## 3. Tech Stack
+## 3. Dataset Details
+
+The dataset used is the Titanic dataset with 891 rows and 12 columns. The most important columns for modeling are `Survived`, `Pclass`, `Sex`, `Age`, `SibSp`, `Parch`, `Fare`, and `Embarked`. The dataset contains missing values mainly in `Cabin`, `Age`, and `Embarked`, so the preprocessing step must handle these carefully.
+
+## 4. Tech Stack
 
 * **Orchestration / DataOps**: Prefect Cloud
 * **Experiment Tracking / MLOps**: MLflow
@@ -22,7 +20,7 @@ This project builds a cloud-based data science / machine learning application us
 * **Storage**: Local EC2 file system
 * **Libraries**: pandas, scikit-learn, matplotlib, seaborn, psutil
 
-## 4. Repository Structure
+## 5. Repository Structure
 
 ```text
 mlpipeline/
@@ -31,7 +29,10 @@ mlpipeline/
 │   └── titanic_processed.csv
 ├── plots/
 │   ├── correlation_heatmap.png
-│   └── survival_dist.png
+│   ├── survival_by_sex.png
+│   ├── survival_by_pclass.png
+│   ├── survival_dist.png
+│   └── confusion_matrix.png
 ├── flows/
 │   └── data_pipeline.py
 ├── ml/
@@ -42,41 +43,42 @@ mlpipeline/
 └── README.md
 ```
 
-## 5. Dataset Setup
+## 6. Setup Instructions
 
-1. Download the Titanic dataset from a public source such as Kaggle.
-2. Rename it to `titanic.csv`.
-3. Place it inside the `data/` folder.
-
-Your project should read the raw data from:
-
-```text
-data/titanic.csv
-```
-
-## 6. Installation Steps
-
-### Step 1: Create the folders
-
-Run this in the project root:
+### 6.1 Create folders
 
 ```bash
 mkdir -p data plots
 ```
 
-### Step 2: Install dependencies
+### 6.2 Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### Step 3: Install Prefect and MLflow if needed separately
+### 6.3 Place the dataset
 
-```bash
-pip install prefect mlflow
+Put the Titanic CSV file here:
+
+```text
+data/titanic.csv
 ```
 
-## 7. `requirements.txt`
+## 7. Code Adjustments for This Dataset
+
+This dataset needs a few small updates compared to the original COVID-based reference code:
+
+1. `Age` has missing values, so fill them with the median.
+2. `Embarked` has missing values, so fill them with the mode.
+3. `Cabin` has many missing values, so drop it for modeling.
+4. `Name`, `Ticket`, and `PassengerId` are not useful for baseline modeling, so drop them.
+5. Create a simple engineered feature such as `FamilySize = SibSp + Parch + 1`.
+6. Use `Sex` and `Embarked` encoding before model training.
+7. Add at least one bivariate chart in EDA, such as survival by sex or class.
+8. Log confusion matrix and system metrics to make the MLOps section stronger.
+
+## 8. `requirements.txt`
 
 ```text
 prefect==2.19.9
@@ -90,62 +92,54 @@ seaborn==0.13.2
 psutil
 ```
 
-## 8. Running the Project
+## 9. Project Execution Order
 
-## 8.1 Prefect Cloud Setup
+Run the project in this order so each component has the files it needs.
 
-This project uses Prefect Cloud for orchestration. The data pipeline should be registered and scheduled from the EC2 environment, and the run history should appear in the Prefect Cloud dashboard. The assignment explicitly asks for automation every 3 minutes and cloud dashboard visibility. 
+### Step 1: Start the MLflow UI
 
-### What to do in Prefect Cloud
-
-1. Create or open your Prefect Cloud workspace.
-2. Copy your Prefect API key / workspace credentials.
-3. In the EC2 terminal, log in to Prefect Cloud:
-
-   ```bash
-   prefect cloud login --key <YOUR_PREFECT_KEY>
-   ```
-4. Confirm the login is successful.
-5. Keep the deployment terminal open after starting the flow so the schedule can keep running.
-6. Open the Prefect Cloud dashboard and verify that the flow runs appear every 3 minutes.
-
-### What to do on EC2
-
-In the project root, run:
-
-```bash
-python flows/data_pipeline.py
-```
-
-This should register the flow and start the scheduled execution.
-
-## 8.2 MLflow Setup
-
-The ML pipeline logs model metrics, parameters, and artifacts to MLflow.
-
-### What to do in Terminal 1
-
-Start MLflow on port 5000:
+Open a terminal and run:
 
 ```bash
 mlflow ui --host 0.0.0.0 --port 5000
 ```
 
-### What to check in the browser
-
-Open:
+Then open:
 
 ```text
 http://localhost:5000
 ```
 
-You should see the experiment runs, logged metrics, and saved models.
+### Step 2: Log in to Prefect Cloud
 
-## 8.3 Run the ML Pipeline
+Before starting the flow, authenticate Prefect on the EC2 instance:
 
-### What to do in Terminal 2
+```bash
+prefect cloud login --key <YOUR_PREFECT_KEY>
+```
 
-Execute the ML training script:
+Make sure the login is successful and the workspace is connected.
+
+### Step 3: Run the Prefect data pipeline
+
+From the project root, run:
+
+```bash
+python flows/data_pipeline.py
+```
+
+This will:
+
+* read `data/titanic.csv`
+* preprocess the data
+* save `data/titanic_processed.csv`
+* generate EDA plots in `plots/`
+* schedule the flow to run every 3 minutes
+* send execution logs to Prefect Cloud
+
+### Step 4: Run the ML training script
+
+After the processed CSV is available, run:
 
 ```bash
 python ml/ml_pipeline.py
@@ -154,32 +148,30 @@ python ml/ml_pipeline.py
 This will:
 
 * load `data/titanic_processed.csv`
-* split the data into train and test sets
+* split the data into 70% training and 30% testing sets
 * train two models
-* log accuracy, precision, recall, and F1 score
-* save the trained model to MLflow
+* log metrics and parameters to MLflow
+* save the trained models in MLflow
 
-## 8.4 Run the API
+### Step 5: Start the API server
 
-### What to do in Terminal 3
-
-Start the FastAPI server:
+Run:
 
 ```bash
 uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```
 
-### Open the API documentation
-
-Visit:
+Then open:
 
 ```text
 http://localhost:8000/docs
 ```
 
-## 9. Project Files
+## 10. Data Pipeline
 
-## 9.1 `flows/data_pipeline.py`
+The assignment requires data ingestion, preprocessing, EDA, and automation every 3 minutes with activity logs visible on a cloud dashboard. 
+
+### `flows/data_pipeline.py`
 
 ```python
 import os
@@ -204,14 +196,22 @@ def ingest_data():
 def preprocess(df):
     logger = get_run_logger()
 
-    logger.info(f"Summary Statistics:\n{df.describe().to_string()}")
+    logger.info(f"Summary Statistics:\n{df.describe(include='all').to_string()}")
     logger.info(f"Missing Values:\n{df.isnull().sum().to_string()}")
     logger.info(f"Data Types:\n{df.dtypes.to_string()}")
 
     df["Age"] = df["Age"].fillna(df["Age"].median())
+    df["Embarked"] = df["Embarked"].fillna(df["Embarked"].mode()[0])
+
+    df["FamilySize"] = df["SibSp"] + df["Parch"] + 1
+    df["IsAlone"] = (df["FamilySize"] == 1).astype(int)
+
+    df = df.drop(columns=["Cabin", "Name", "Ticket", "PassengerId"])
 
     scaler = MinMaxScaler()
-    df[["Age", "Fare"]] = scaler.fit_transform(df[["Age", "Fare"]])
+    df[["Age", "Fare", "SibSp", "Parch", "FamilySize"]] = scaler.fit_transform(
+        df[["Age", "Fare", "SibSp", "Parch", "FamilySize"]]
+    )
 
     df.to_csv("data/titanic_processed.csv", index=False)
     return df
@@ -234,6 +234,20 @@ def run_eda(df):
     plt.savefig("plots/survival_dist.png")
     plt.close()
 
+    plt.figure(figsize=(6, 4))
+    sns.countplot(data=df, x="Sex", hue="Survived")
+    plt.title("Survival by Sex")
+    plt.tight_layout()
+    plt.savefig("plots/survival_by_sex.png")
+    plt.close()
+
+    plt.figure(figsize=(6, 4))
+    sns.countplot(data=df, x="Pclass", hue="Survived")
+    plt.title("Survival by Passenger Class")
+    plt.tight_layout()
+    plt.savefig("plots/survival_by_pclass.png")
+    plt.close()
+
     return "EDA charts saved to plots/"
 
 @flow(name="Titanic-DataOps-Local")
@@ -246,62 +260,117 @@ if __name__ == "__main__":
     data_ops_flow.serve(name="titanic-local-deployment", cron="*/3 * * * *")
 ```
 
-## 9.2 `ml/ml_pipeline.py`
+## 11. Machine Learning Pipeline
+
+The assignment requires two algorithms, a 70/30 split, and at least four logged metrics. 
+
+### `ml/ml_pipeline.py`
 
 ```python
 import mlflow
 import mlflow.sklearn
 import pandas as pd
+import psutil
+import time
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.metrics import (
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+    confusion_matrix
+)
 
-def train_models():
+def prepare_data():
     df = pd.read_csv("data/titanic_processed.csv")
 
     df["Sex"] = df["Sex"].map({"male": 0, "female": 1})
+    df["Embarked"] = df["Embarked"].map({"S": 0, "C": 1, "Q": 2})
 
-    X = df[["Pclass", "Sex", "Age", "Fare"]]
+    df = pd.get_dummies(df, columns=["Embarked"], drop_first=True)
+
+    feature_cols = [
+        "Pclass", "Sex", "Age", "SibSp", "Parch", "Fare", "FamilySize", "IsAlone"
+    ]
+    feature_cols += [c for c in df.columns if c.startswith("Embarked_")]
+
+    X = df[feature_cols]
     y = df["Survived"]
+    return X, y
+
+def train_and_log_model(model_name, model, X_train, X_test, y_train, y_test):
+    with mlflow.start_run(run_name=model_name):
+        start_time = time.time()
+
+        model.fit(X_train, y_train)
+        y_pred = model.predict(X_test)
+
+        end_time = time.time()
+
+        accuracy = accuracy_score(y_test, y_pred)
+        precision = precision_score(y_test, y_pred, average="macro", zero_division=0)
+        recall = recall_score(y_test, y_pred, average="macro", zero_division=0)
+        f1 = f1_score(y_test, y_pred, average="macro", zero_division=0)
+        confusion = confusion_matrix(y_test, y_pred)
+
+        mlflow.log_metric("accuracy", accuracy)
+        mlflow.log_metric("precision", precision)
+        mlflow.log_metric("recall", recall)
+        mlflow.log_metric("f1_score", f1)
+        mlflow.log_metric("training_time_seconds", end_time - start_time)
+
+        mlflow.log_metric("true_positive", int(confusion[1][1]))
+        mlflow.log_metric("false_positive", int(confusion[0][1]))
+        mlflow.log_metric("true_negative", int(confusion[0][0]))
+        mlflow.log_metric("false_negative", int(confusion[1][0]))
+
+        mlflow.log_metric("system_cpu_usage", psutil.cpu_percent(interval=1))
+        mlflow.log_metric("system_memory_usage", psutil.virtual_memory().percent)
+
+        if model_name == "RandomForest":
+            mlflow.log_param("max_depth", model.max_depth)
+            mlflow.log_param("n_estimators", model.n_estimators)
+        else:
+            mlflow.log_param("max_iter", model.max_iter)
+
+        mlflow.sklearn.log_model(model, "model")
+
+        print(f"Successfully logged {model_name} to MLflow.")
+        print(f"Accuracy: {accuracy:.4f}")
+
+def main():
+    X, y = prepare_data()
 
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.3, random_state=42
+        X, y, test_size=0.3, random_state=42, stratify=y
     )
-
-    models = {
-        "RandomForest": RandomForestClassifier(max_depth=3, n_estimators=100),
-        "LogisticRegression": LogisticRegression(max_iter=1000)
-    }
 
     mlflow.set_experiment("Titanic_Survival_Local")
 
-    for name, model in models.items():
-        with mlflow.start_run(run_name=name):
-            model.fit(X_train, y_train)
-            y_pred = model.predict(X_test)
+    models = {
+        "RandomForest": RandomForestClassifier(max_depth=3, n_estimators=100, random_state=42),
+        "LogisticRegression": LogisticRegression(max_iter=1000, random_state=42)
+    }
 
-            mlflow.log_metric("accuracy", accuracy_score(y_test, y_pred))
-            mlflow.log_metric("precision", precision_score(y_test, y_pred))
-            mlflow.log_metric("recall", recall_score(y_test, y_pred))
-            mlflow.log_metric("f1_score", f1_score(y_test, y_pred))
-
-            if name == "RandomForest":
-                mlflow.log_param("max_depth", 3)
-
-            mlflow.sklearn.log_model(model, "model")
-            print(f"Successfully logged {name} to MLflow.")
+    for model_name, model in models.items():
+        train_and_log_model(model_name, model, X_train, X_test, y_train, y_test)
 
 if __name__ == "__main__":
-    train_models()
+    main()
 ```
 
-## 9.3 `api/main.py`
+## 12. API Layer
+
+The assignment requires using built-in APIs to retrieve and display at least two application details. 
+
+### `api/main.py`
 
 ```python
 from fastapi import FastAPI
-import mlflow.tracking
 import mlflow
+import mlflow.tracking
 
 app = FastAPI(title="Titanic Local ML Application API")
 client = mlflow.tracking.MlflowClient()
@@ -326,48 +395,65 @@ def get_status():
     }
 ```
 
-## 10. What to Demonstrate in Screenshots / Video
+## 13. Useful Commands
 
-The submission should include a Word/PDF document with screenshots and explanation, plus a video showing the full workflow. The assignment also encourages using a virtual lab, which can earn bonus credit. 
+### Open MLflow UI
 
-### Required evidence
+```bash
+mlflow ui --host 0.0.0.0 --port 5000
+```
 
-* Prefect Cloud dashboard showing the scheduled flow
-* MLflow UI showing the two model runs and logged metrics
-* Terminal showing the data pipeline running
-* Terminal showing the ML pipeline execution
-* FastAPI `/docs` page
-* API output from `/application-details`
-* Folder structure showing `data/` and `plots/`
+### Run the data pipeline
 
-## 11. API Checks
+```bash
+python flows/data_pipeline.py
+```
 
-### Check application details
+### Run the ML pipeline
+
+```bash
+python ml/ml_pipeline.py
+```
+
+### Run the API server
+
+```bash
+uvicorn api.main:app --host 0.0.0.0 --port 8000
+```
+
+### Test API endpoints
 
 ```bash
 curl http://127.0.0.1:8000/application-details
-```
-
-### Check pipeline status
-
-```bash
 curl http://127.0.0.1:8000/pipeline-status
 ```
 
-## 12. Submission Checklist
+## 14. What to Capture for Submission
 
-* Word/PDF document with project explanation and screenshots
-* Video demonstration of the complete project
-* Prefect Cloud dashboard proof
-* MLflow experiment screenshots
-* Clear mention of group member contribution
-* Evidence of virtual lab usage, if used
+The submission must include a Word/PDF document with screenshots and explanation, plus a video demonstration. The assignment also encourages using a virtual lab, which can earn bonus credit. 
 
-## 13. Notes
+### Recommended screenshots
 
-* Keep the `data/` and `plots/` folders in the project root.
-* Make sure `titanic.csv` is present before running the pipeline.
-* Run the Prefect flow first so that `titanic_processed.csv` is created before ML training.
-* Run the ML pipeline only after the data pipeline has completed successfully.
+* Prefect Cloud dashboard showing successful runs every 3 minutes
+* Data pipeline terminal output
+* MLflow UI showing both trained models and metrics
+* FastAPI `/docs` page
+* API response from `/application-details`
+* Project folder structure showing `data/` and `plots/`
 
----
+## 15. Submission Checklist
+
+* Word/PDF document with explanation and screenshots
+* Video demo of the entire workflow
+* Prefect Cloud proof of scheduled execution
+* MLflow experiment proof
+* API demo proof
+* Virtual lab proof if available
+
+## 16. Final Notes
+
+* Keep `titanic.csv` in the `data/` folder before running anything.
+* Run the Prefect flow first so the processed dataset is created.
+* Run the ML pipeline after preprocessing completes.
+* Use Prefect Cloud for flow visibility and scheduling.
+* Use MLflow UI for model comparison and metric tracking.
