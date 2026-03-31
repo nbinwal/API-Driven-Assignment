@@ -1,18 +1,12 @@
 # CCZG506: API-Driven Cloud Native ML Pipeline
 
-## 1. Project Overview
+This project implements a cloud-based data science / machine learning application using the Titanic dataset. It satisfies the assignment requirements by providing a data pipeline for ingestion, preprocessing, EDA, and monitoring; a machine learning pipeline for model training and evaluation; and an API layer to retrieve application details. The assignment requires the data workflow to run every 3 minutes, the ML pipeline to train two algorithms using a 70/30 split, and the model monitoring section to log at least four metrics. 
 
-This project implements a cloud-based data science / machine learning application using the Titanic dataset. It satisfies the assignment requirements by providing: a data pipeline for ingestion, preprocessing, EDA, and monitoring; a machine learning pipeline for model training and evaluation; and an API layer to retrieve application details. The assignment requires the data workflow to run every 3 minutes, the ML pipeline to use two algorithms with a 70/30 split, and the model monitoring section to log at least four metrics. 
+## 1. Business Problem
 
-## 2. Business Problem
+Predict whether a Titanic passenger survived based on passenger attributes such as class, sex, age, fare, family size, and embarkation port.
 
-The business objective is to predict whether a Titanic passenger survived based on passenger features such as class, sex, age, family structure, fare, and embarkation port. This is a classification problem and is suitable for comparing multiple supervised learning models.
-
-## 3. Dataset Details
-
-The dataset used is the Titanic dataset with 891 rows and 12 columns. The most important columns for modeling are `Survived`, `Pclass`, `Sex`, `Age`, `SibSp`, `Parch`, `Fare`, and `Embarked`. The dataset contains missing values mainly in `Cabin`, `Age`, and `Embarked`, so the preprocessing step must handle these carefully.
-
-## 4. Tech Stack
+## 2. Tech Stack
 
 * **Orchestration / DataOps**: Prefect Cloud
 * **Experiment Tracking / MLOps**: MLflow
@@ -20,7 +14,7 @@ The dataset used is the Titanic dataset with 891 rows and 12 columns. The most i
 * **Storage**: Local EC2 file system
 * **Libraries**: pandas, scikit-learn, matplotlib, seaborn, psutil
 
-## 5. Repository Structure
+## 3. Project Structure
 
 ```text
 mlpipeline/
@@ -29,10 +23,9 @@ mlpipeline/
 │   └── titanic_processed.csv
 ├── plots/
 │   ├── correlation_heatmap.png
-│   ├── survival_by_sex.png
-│   ├── survival_by_pclass.png
 │   ├── survival_dist.png
-│   └── confusion_matrix.png
+│   ├── survival_by_sex.png
+│   └── survival_by_pclass.png
 ├── flows/
 │   └── data_pipeline.py
 ├── ml/
@@ -43,42 +36,107 @@ mlpipeline/
 └── README.md
 ```
 
-## 6. Setup Instructions
+## 4. Create the Project From Scratch
 
-### 6.1 Create folders
-
-```bash
-mkdir -p data plots
-```
-
-### 6.2 Install dependencies
+### Step 1: Create all folders
 
 ```bash
-pip install -r requirements.txt
+mkdir -p mlpipeline/{data,plots,flows,ml,api}
+cd mlpipeline
 ```
 
-### 6.3 Place the dataset
+### Step 2: Create all files
 
-Put the Titanic CSV file here:
+```bash
+touch requirements.txt README.md
+touch data/titanic.csv
+touch flows/data_pipeline.py
+touch ml/ml_pipeline.py
+touch api/main.py
+```
+
+### Step 3: Put the dataset in place
+
+Copy your Titanic file into:
 
 ```text
 data/titanic.csv
 ```
 
-## 7. Code Adjustments for This Dataset
+If your file is named `Titanic-Dataset.csv`, copy it like this:
 
-This dataset needs a few small updates compared to the original COVID-based reference code:
+```bash
+cp /path/to/Titanic-Dataset.csv data/titanic.csv
+```
 
-1. `Age` has missing values, so fill them with the median.
-2. `Embarked` has missing values, so fill them with the mode.
-3. `Cabin` has many missing values, so drop it for modeling.
-4. `Name`, `Ticket`, and `PassengerId` are not useful for baseline modeling, so drop them.
-5. Create a simple engineered feature such as `FamilySize = SibSp + Parch + 1`.
-6. Use `Sex` and `Embarked` encoding before model training.
-7. Add at least one bivariate chart in EDA, such as survival by sex or class.
-8. Log confusion matrix and system metrics to make the MLOps section stronger.
+### Step 4: Install dependencies
 
-## 8. `requirements.txt`
+```bash
+pip install -r requirements.txt
+```
+
+If needed, install directly too:
+
+```bash
+pip install prefect mlflow fastapi uvicorn pandas scikit-learn matplotlib seaborn psutil
+```
+
+### Step 5: Log in to Prefect Cloud
+
+```bash
+prefect cloud login --key <YOUR_PREFECT_KEY>
+```
+
+### Step 6: Start MLflow UI
+
+Open a new terminal and run:
+
+```bash
+mlflow ui --host 0.0.0.0 --port 5000
+```
+
+Open in browser:
+
+```text
+http://localhost:5000
+```
+
+### Step 7: Run the Prefect data pipeline
+
+From the project root:
+
+```bash
+python flows/data_pipeline.py
+```
+
+### Step 8: Run the ML pipeline
+
+After `data/titanic_processed.csv` is created:
+
+```bash
+python ml/ml_pipeline.py
+```
+
+### Step 9: Start the API server
+
+```bash
+uvicorn api.main:app --host 0.0.0.0 --port 8000
+```
+
+### Step 10: Open the API docs
+
+```text
+http://localhost:8000/docs
+```
+
+### Step 11: Test the API endpoints
+
+```bash
+curl http://127.0.0.1:8000/application-details
+curl http://127.0.0.1:8000/pipeline-status
+```
+
+## 5. `requirements.txt`
 
 ```text
 prefect==2.19.9
@@ -92,82 +150,7 @@ seaborn==0.13.2
 psutil
 ```
 
-## 9. Project Execution Order
-
-Run the project in this order so each component has the files it needs.
-
-### Step 1: Start the MLflow UI
-
-Open a terminal and run:
-
-```bash
-mlflow ui --host 0.0.0.0 --port 5000
-```
-
-Then open:
-
-```text
-http://localhost:5000
-```
-
-### Step 2: Log in to Prefect Cloud
-
-Before starting the flow, authenticate Prefect on the EC2 instance:
-
-```bash
-prefect cloud login --key <YOUR_PREFECT_KEY>
-```
-
-Make sure the login is successful and the workspace is connected.
-
-### Step 3: Run the Prefect data pipeline
-
-From the project root, run:
-
-```bash
-python flows/data_pipeline.py
-```
-
-This will:
-
-* read `data/titanic.csv`
-* preprocess the data
-* save `data/titanic_processed.csv`
-* generate EDA plots in `plots/`
-* schedule the flow to run every 3 minutes
-* send execution logs to Prefect Cloud
-
-### Step 4: Run the ML training script
-
-After the processed CSV is available, run:
-
-```bash
-python ml/ml_pipeline.py
-```
-
-This will:
-
-* load `data/titanic_processed.csv`
-* split the data into 70% training and 30% testing sets
-* train two models
-* log metrics and parameters to MLflow
-* save the trained models in MLflow
-
-### Step 5: Start the API server
-
-Run:
-
-```bash
-uvicorn api.main:app --host 0.0.0.0 --port 8000
-```
-
-Then open:
-
-```text
-http://localhost:8000/docs
-```
-
-## 10. Data Pipeline
+## 6. Data Pipeline
 
 The assignment requires data ingestion, preprocessing, EDA, and automation every 3 minutes with activity logs visible on a cloud dashboard. 
 
@@ -195,6 +178,7 @@ def ingest_data():
 @task(name="Data Pre-processing")
 def preprocess(df):
     logger = get_run_logger()
+    df = df.copy()
 
     logger.info(f"Summary Statistics:\n{df.describe(include='all').to_string()}")
     logger.info(f"Missing Values:\n{df.isnull().sum().to_string()}")
@@ -214,6 +198,7 @@ def preprocess(df):
     )
 
     df.to_csv("data/titanic_processed.csv", index=False)
+    logger.info("Saved processed dataset to data/titanic_processed.csv")
     return df
 
 @task(name="Exploratory Data Analysis")
@@ -260,9 +245,22 @@ if __name__ == "__main__":
     data_ops_flow.serve(name="titanic-local-deployment", cron="*/3 * * * *")
 ```
 
-## 11. Machine Learning Pipeline
+### What this pipeline does
 
-The assignment requires two algorithms, a 70/30 split, and at least four logged metrics. 
+1. reads `data/titanic.csv`
+2. prints summary statistics, missing values, and data types
+3. fills missing `Age` values with the median
+4. fills missing `Embarked` values with the mode
+5. creates `FamilySize` and `IsAlone`
+6. drops `Cabin`, `Name`, `Ticket`, and `PassengerId`
+7. normalizes numeric columns
+8. saves `data/titanic_processed.csv`
+9. creates EDA plots in `plots/`
+10. schedules the flow every 3 minutes in Prefect Cloud
+
+## 7. Machine Learning Pipeline
+
+The assignment requires two algorithms, a 70/30 split, model evaluation, and at least four logged metrics. 
 
 ### `ml/ml_pipeline.py`
 
@@ -283,11 +281,13 @@ from sklearn.metrics import (
     confusion_matrix
 )
 
+mlflow.set_tracking_uri("file:./mlruns")
+
 def prepare_data():
     df = pd.read_csv("data/titanic_processed.csv")
 
     df["Sex"] = df["Sex"].map({"male": 0, "female": 1})
-    df["Embarked"] = df["Embarked"].map({"S": 0, "C": 1, "Q": 2})
+    df["Embarked"] = df["Embarked"].fillna(df["Embarked"].mode()[0])
 
     df = pd.get_dummies(df, columns=["Embarked"], drop_first=True)
 
@@ -361,9 +361,21 @@ if __name__ == "__main__":
     main()
 ```
 
-## 12. API Layer
+### What this pipeline does
 
-The assignment requires using built-in APIs to retrieve and display at least two application details. 
+1. loads `data/titanic_processed.csv`
+2. encodes `Sex`
+3. encodes `Embarked`
+4. selects the final feature set
+5. splits the dataset into 70% training and 30% testing
+6. trains `RandomForestClassifier`
+7. trains `LogisticRegression`
+8. logs accuracy, precision, recall, F1, confusion matrix values, system metrics, and training time to MLflow
+9. saves each trained model as an MLflow artifact
+
+## 8. API Layer
+
+The assignment requires built-in APIs to retrieve and display at least two application details. 
 
 ### `api/main.py`
 
@@ -378,7 +390,6 @@ client = mlflow.tracking.MlflowClient()
 @app.get("/application-details")
 def get_details():
     experiment = client.get_experiment_by_name("Titanic_Survival_Local")
-
     return {
         "Application_Objective": "Titanic Survival Prediction",
         "Storage_Type": "EC2 Local File System",
@@ -395,65 +406,142 @@ def get_status():
     }
 ```
 
-## 13. Useful Commands
+## 9. Exact Execution Order
 
-### Open MLflow UI
+### Step 1: Create folders and files
+
+Use the commands in Section 4.
+
+### Step 2: Put the dataset in `data/titanic.csv`
+
+Make sure the Titanic CSV is present before running anything.
+
+### Step 3: Install dependencies
+
+Use the commands in Section 4.
+
+### Step 4: Log in to Prefect Cloud
+
+```bash
+prefect cloud login --key <YOUR_PREFECT_KEY>
+```
+
+### Step 5: Start MLflow UI
 
 ```bash
 mlflow ui --host 0.0.0.0 --port 5000
 ```
 
-### Run the data pipeline
+### Step 6: Run the Prefect data pipeline
 
 ```bash
 python flows/data_pipeline.py
 ```
 
-### Run the ML pipeline
+### Step 7: Verify Prefect Cloud
+
+Open the Prefect Cloud dashboard and confirm:
+
+* deployment name: `titanic-local-deployment`
+* schedule: every 3 minutes
+* flow runs are appearing
+* task logs are visible for ingestion, preprocessing, and EDA
+
+### Step 8: Run the ML pipeline
 
 ```bash
 python ml/ml_pipeline.py
 ```
 
-### Run the API server
+### Step 9: Verify MLflow
+
+Open:
+
+```text
+http://localhost:5000
+```
+
+Confirm:
+
+* `RandomForest` run
+* `LogisticRegression` run
+* metrics
+* model artifacts
+
+### Step 10: Start the API
 
 ```bash
 uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```
 
-### Test API endpoints
+### Step 11: Open API docs
+
+```text
+http://localhost:8000/docs
+```
+
+### Step 12: Test the API
 
 ```bash
 curl http://127.0.0.1:8000/application-details
 curl http://127.0.0.1:8000/pipeline-status
 ```
 
-## 14. What to Capture for Submission
+## 10. What Will Be Visible in Prefect Cloud
 
-The submission must include a Word/PDF document with screenshots and explanation, plus a video demonstration. The assignment also encourages using a virtual lab, which can earn bonus credit. 
+After running the data pipeline, Prefect Cloud should show:
 
-### Recommended screenshots
+* the deployment `titanic-local-deployment`
+* a schedule that triggers every 3 minutes
+* flow runs for each scheduled execution
+* the task graph containing:
+
+  * `ingest_data`
+  * `preprocess`
+  * `run_eda`
+* logs for each task
+* run status, start time, end time, and duration
+
+This is the expected DataOps proof for the assignment. 
+
+## 11. What to Capture for Submission
+
+The submission should include a Word/PDF document with screenshots and explanation, plus a video demonstration. The assignment also encourages using a virtual lab, which can earn bonus credit. 
+
+### Screenshots to include
 
 * Prefect Cloud dashboard showing successful runs every 3 minutes
-* Data pipeline terminal output
-* MLflow UI showing both trained models and metrics
+* Prefect task logs
+* MLflow UI showing both models and metrics
 * FastAPI `/docs` page
 * API response from `/application-details`
-* Project folder structure showing `data/` and `plots/`
+* Folder structure showing `data/` and `plots/`
 
-## 15. Submission Checklist
+### Video should show
 
-* Word/PDF document with explanation and screenshots
-* Video demo of the entire workflow
-* Prefect Cloud proof of scheduled execution
-* MLflow experiment proof
-* API demo proof
-* Virtual lab proof if available
+* the Prefect Cloud dashboard
+* the data pipeline run
+* the MLflow UI
+* the ML pipeline run
+* the FastAPI docs
+* the API endpoint response
 
-## 16. Final Notes
+## 12. Final Checklist
 
-* Keep `titanic.csv` in the `data/` folder before running anything.
-* Run the Prefect flow first so the processed dataset is created.
-* Run the ML pipeline after preprocessing completes.
-* Use Prefect Cloud for flow visibility and scheduling.
-* Use MLflow UI for model comparison and metric tracking.
+* `data/titanic.csv` is present
+* `plots/` exists
+* Prefect Cloud login is done
+* Data pipeline runs successfully
+* MLflow UI opens and shows the runs
+* ML pipeline completes successfully
+* FastAPI server starts successfully
+* API endpoints return JSON
+* screenshots and video are ready for submission
+
+## 13. Final Notes
+
+* Run the Prefect flow first so `titanic_processed.csv` is created.
+* Run the ML pipeline only after preprocessing is complete.
+* Keep the MLflow UI terminal open while testing.
+* Keep the Prefect Cloud flow terminal open so scheduled runs continue.
+* The code above is aligned to the Titanic dataset columns and is structured to run cleanly from a fresh setup.
