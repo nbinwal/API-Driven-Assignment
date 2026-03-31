@@ -1,5 +1,5 @@
 # CCZG506 — Assignment I: Cloud-Native ML Pipeline
-### Stack: Prefect Cloud · MLflow · FastAPI · AWS S3 · Local Execution
+### Stack: Prefect Cloud · MLflow · FastAPI · AWS S3 · AWS CloudShell
 
 ---
 
@@ -7,183 +7,229 @@
 
 1. [Architecture Overview](#1-architecture-overview)
 2. [What Runs Where](#2-what-runs-where)
-3. [Prerequisites](#3-prerequisites)
-4. [Project Structure](#4-project-structure)
-5. [AWS Setup](#5-aws-setup)
-6. [Local Environment Setup](#6-local-environment-setup)
-7. [Prefect Cloud Setup](#7-prefect-cloud-setup)
-8. [Sub-Objective 1 — Data Pipeline](#8-sub-objective-1--data-pipeline)
-9. [Sub-Objective 2 — ML Pipeline](#9-sub-objective-2--ml-pipeline)
-10. [Sub-Objective 3 — API Access](#10-sub-objective-3--api-access)
-11. [Run Everything — Step by Step](#11-run-everything--step-by-step)
-12. [Screenshots Guide](#12-screenshots-guide)
-13. [Mark Breakdown](#13-mark-breakdown)
-14. [Troubleshooting](#14-troubleshooting)
+3. [Project Structure](#3-project-structure)
+4. [Step 1 — Get AWS Credentials from CloudShell](#4-step-1--get-aws-credentials-from-cloudshell)
+5. [Step 2 — Create S3 Bucket](#5-step-2--create-s3-bucket)
+6. [Step 3 — Upload Titanic Dataset](#6-step-3--upload-titanic-dataset)
+7. [Step 4 — Local Python Setup](#7-step-4--local-python-setup)
+8. [Step 5 — Prefect Cloud Setup](#8-step-5--prefect-cloud-setup)
+9. [Sub-Objective 1 — Data Pipeline Code](#9-sub-objective-1--data-pipeline-code)
+10. [Sub-Objective 2 — ML Pipeline Code](#10-sub-objective-2--ml-pipeline-code)
+11. [Sub-Objective 3 — API Code](#11-sub-objective-3--api-code)
+12. [Run Everything — Step by Step](#12-run-everything--step-by-step)
+13. [Refresh Expired Credentials](#13-refresh-expired-credentials)
+14. [Screenshots Guide](#14-screenshots-guide)
+15. [Mark Breakdown](#15-mark-breakdown)
+16. [Troubleshooting](#16-troubleshooting)
 
 ---
 
 ## 1. Architecture Overview
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           AWS Cloud                                     │
-│                                                                         │
-│   ┌──────────────────────────────────┐   ┌───────────────────────────┐ │
-│   │           Amazon S3              │   │      Prefect Cloud        │ │
-│   │   mlpipeline-titanic-<name>/     │   │   app.prefect.cloud       │ │
-│   │                                  │   │                           │ │
-│   │   data/titanic.csv               │   │  ✓ Schedule (*/3 * * * *) │ │
-│   │   data/titanic_processed.csv     │   │  ✓ Flow run dashboard     │ │
-│   │   plots/*.png  (5 EDA charts)    │   │  ✓ Live task logs         │ │
-│   │   mlflow-artifacts/  (models)    │   │  ✓ REST API               │ │
-│   └──────────────────────────────────┘   └───────────────────────────┘ │
-│              ▲  reads / writes                    ▲  schedules          │
-└──────────────│───────────────────────────────────│─────────────────────┘
-               │                                   │ polls every ~5s
-┌──────────────│───────────────────────────────────│─────────────────────┐
-│              │        Your Local Machine          │                     │
-│              │                                   │                     │
-│   ┌──────────▼──────────────────────────────────▼──────────────────┐  │
-│   │                   Python Processes                              │  │
-│   │                                                                 │  │
-│   │   prefect worker  ──── executes flows on schedule              │  │
-│   │   flows/data_pipeline.py                                        │  │
-│   │       @task: ingest_data()        → reads from S3              │  │
-│   │       @task: preprocess_data()    → cleans + saves to S3       │  │
-│   │       @task: perform_eda()        → plots + saves to S3        │  │
-│   │                                                                 │  │
-│   │   mlflow server  (localhost:5000)                               │  │
-│   │   ml/ml_pipeline.py                                             │  │
-│   │       RandomForest + LogisticRegression                         │  │
-│   │       metrics logged → MLflow  │  model artifacts → S3         │  │
-│   │                                                                 │  │
-│   │   fastapi (localhost:8000)                                      │  │
-│   │   api/main.py                                                   │  │
-│   │       /prefect/deployments  → calls Prefect Cloud REST API     │  │
-│   │       /prefect/flow-runs    → calls Prefect Cloud REST API     │  │
-│   │       /mlflow/experiment    → calls local MLflow               │  │
-│   │       /mlflow/models        → calls local MLflow               │  │
-│   └─────────────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                              AWS Cloud                                   │
+│                                                                          │
+│  ┌─────────────────────────┐      ┌─────────────────────────────────┐   │
+│  │      Amazon S3          │      │        Prefect Cloud            │   │
+│  │                         │      │     app.prefect.cloud           │   │
+│  │  data/titanic.csv       │      │                                 │   │
+│  │  data/titanic_proc.csv  │      │  ✓ Schedule  (*/3 * * * *)      │   │
+│  │  plots/*.png (5 charts) │      │  ✓ Flow run dashboard           │   │
+│  │  mlflow-artifacts/      │      │  ✓ Live task logs               │   │
+│  └────────────▲────────────┘      │  ✓ REST API                     │   │
+│               │ reads/writes      └──────────────▲──────────────────┘   │
+│  ┌────────────┴────────────┐                     │ schedules & logs      │
+│  │    AWS CloudShell       │                     │                       │
+│  │  (credential source)    │                     │                       │
+│  │  aws sts get-session-   │                     │                       │
+│  │  token  →  copy creds   │                     │                       │
+│  └─────────────────────────┘                     │                       │
+└─────────────────────────────────────────────────-│───────────────────────┘
+                                                   │
+┌──────────────────────────────────────────────────│───────────────────────┐
+│                     Your Local Machine            │                       │
+│                                                   │                       │
+│   ┌───────────────────────────────────────────────▼──────────────────┐   │
+│   │  Terminal 1: mlflow server  (localhost:5000)                      │   │
+│   │  Terminal 2: python ml/ml_pipeline.py   (runs once)              │   │
+│   │  Terminal 3: prefect worker  ←──────────────── polls Prefect     │   │
+│   │             + python flows/data_pipeline.py  (registers schedule)│   │
+│   │  Terminal 4: uvicorn api/main  (localhost:8000)                  │   │
+│   └──────────────────────────────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
 ## 2. What Runs Where
 
-| Component | Where | Why it counts as cloud |
+| Component | Where | Notes |
 |---|---|---|
-| **Prefect Cloud dashboard** | Prefect's hosted servers | Real cloud SaaS — `app.prefect.cloud` |
-| **Prefect schedule** | Prefect Cloud | Hosted externally, not on your machine |
+| **Prefect Cloud dashboard** | Prefect's hosted servers | `app.prefect.cloud` — real cloud SaaS |
+| **Flow schedule (*/3 min)** | Prefect Cloud | Hosted externally |
 | **Flow run logs** | Prefect Cloud | Streamed from local worker, stored in cloud |
 | **Prefect REST API** | Prefect Cloud | Used by FastAPI for Sub-Objective 3 |
-| **S3 — data & plots** | AWS S3 | Fully cloud storage |
-| **S3 — model artifacts** | AWS S3 | MLflow artifacts stored in S3 |
+| **S3 — data, plots, models** | AWS S3 | Fully cloud storage |
+| **AWS credentials** | AWS CloudShell | Temporary session credentials, ~12hr expiry |
 | **Prefect worker** | Local machine | Executes flows, reports to Prefect Cloud |
-| **MLflow server** | Local machine | UI + tracking DB on localhost |
-| **FastAPI** | Local machine | Calls cloud APIs (Prefect + S3) |
+| **MLflow UI + tracking** | Local machine | localhost:5000 |
+| **FastAPI Swagger UI** | Local machine | localhost:8000 |
 
-> **Note on Virtual Lab:** The BITS AWS account has an SCP (Service Control Policy) that explicitly blocks `ec2:RunInstances`. This is an organization-level restriction that cannot be overridden. All cloud components (Prefect Cloud, S3) remain fully in the cloud. The assignment requirement for a "cloud dashboard" is satisfied by Prefect Cloud.
-
----
-
-## 3. Prerequisites
-
-### Accounts needed
-- **AWS Account** — your BITS Virtual Lab account (already have it)
-- **Prefect Cloud** — free account at https://app.prefect.cloud (sign up now)
-- **Kaggle** — to download the Titanic dataset
-
-### Software needed on your machine
-- Python 3.9 or higher — check with `python --version`
-- pip — check with `pip --version`
-- AWS CLI — install from https://aws.amazon.com/cli/
-
-Check Python version:
-```bash
-python --version    # Need 3.9+
-# If you have python3 instead of python:
-python3 --version
-```
+> **Why local execution:** The BITS Virtual Lab AWS account has an SCP (Service Control Policy)
+> that blocks `ec2:RunInstances` and federated sessions cannot generate permanent IAM keys.
+> All cloud components (Prefect Cloud, S3, schedule, dashboard) remain genuinely cloud-hosted.
 
 ---
 
-## 4. Project Structure
+## 3. Project Structure
 
 ```
 mlpipeline/
 ├── flows/
-│   └── data_pipeline.py       # Prefect @flow — 3 @tasks + deployment registration
+│   └── data_pipeline.py       # Prefect @flow — 3 @tasks + deployment
 ├── ml/
 │   └── ml_pipeline.py         # MLflow training pipeline
 ├── api/
 │   └── main.py                # FastAPI application
 ├── data/
-│   └── titanic.csv            # Downloaded from Kaggle (local copy)
-├── requirements.txt
-└── README.md
+│   └── titanic.csv            # Downloaded from Kaggle
+└── requirements.txt
 ```
 
 ---
 
-## 5. AWS Setup
+## 4. Step 1 — Get AWS Credentials from CloudShell
 
-### Step 1 — Configure AWS CLI
+Your BITS Virtual Lab account uses **federated sessions** — you cannot create permanent
+IAM access keys. Instead, you get **temporary credentials** from AWS CloudShell.
+These last approximately 12 hours per session.
+
+### Open CloudShell
+
+1. Log in to **https://console.aws.amazon.com**
+2. In the top navigation bar, click the **CloudShell icon** (looks like `>_`)
+   — OR — search for **CloudShell** in the services search bar
+3. Wait ~30 seconds for the shell to initialize
+
+### Get temporary credentials
+
+Run this in CloudShell:
 
 ```bash
-aws configure
+aws sts get-session-token --duration-seconds 43200
 ```
 
-Enter these when prompted:
-```
-AWS Access Key ID:     <from Virtual Lab — see below>
-AWS Secret Access Key: <from Virtual Lab — see below>
-Default region name:   ap-south-1
-Default output format: json
+You will get output like this:
+
+```json
+{
+    "Credentials": {
+        "AccessKeyId":     "ASIA3XXXXXXXXXXXXXXXXX",
+        "SecretAccessKey": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+        "SessionToken":    "FwoGZXIvYXdzEJ...very long string...==",
+        "Expiration":      "2026-04-01T10:00:00+00:00"
+    }
+}
 ```
 
-**To find your credentials:**
-1. AWS Console → top right corner → your username → **Security Credentials**
-2. **Access Keys** → **Create Access Key**
-3. Copy both the key ID and secret
+### Set credentials on your local machine
 
-Verify it works:
+Copy the three values and set them as environment variables locally.
+
+**Mac / Linux** — paste in your terminal:
+```bash
+export AWS_ACCESS_KEY_ID="ASIA3XXXXXXXXXXXXXXXXX"
+export AWS_SECRET_ACCESS_KEY="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+export AWS_SESSION_TOKEN="FwoGZXIvYXdz...paste full token here..."
+export AWS_DEFAULT_REGION="ap-south-1"
+```
+
+Also add your other project variables:
+```bash
+export S3_BUCKET="mlpipeline-titanic-<yourname>"
+export MLFLOW_TRACKING_URI="http://localhost:5000"
+export PREFECT_API_KEY=""       # fill in after Step 5
+export PREFECT_API_URL=""       # fill in after Step 5
+```
+
+**Windows CMD** — paste in Command Prompt:
+```cmd
+set AWS_ACCESS_KEY_ID=ASIA3XXXXXXXXXXXXXXXXX
+set AWS_SECRET_ACCESS_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+set AWS_SESSION_TOKEN=FwoGZXIvYXdz...paste full token here...
+set AWS_DEFAULT_REGION=ap-south-1
+set S3_BUCKET=mlpipeline-titanic-<yourname>
+set MLFLOW_TRACKING_URI=http://localhost:5000
+set PREFECT_API_KEY=
+set PREFECT_API_URL=
+```
+
+**Windows PowerShell:**
+```powershell
+$env:AWS_ACCESS_KEY_ID     = "ASIA3XXXXXXXXXXXXXXXXX"
+$env:AWS_SECRET_ACCESS_KEY = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+$env:AWS_SESSION_TOKEN     = "FwoGZXIvYXdz...paste full token here..."
+$env:AWS_DEFAULT_REGION    = "ap-south-1"
+$env:S3_BUCKET             = "mlpipeline-titanic-<yourname>"
+$env:MLFLOW_TRACKING_URI   = "http://localhost:5000"
+$env:PREFECT_API_KEY       = ""
+$env:PREFECT_API_URL       = ""
+```
+
+### Verify credentials work
+
 ```bash
 aws sts get-caller-identity
-# Should return your account ID and role ARN
+# Should return your account ID and role without error
 ```
 
-### Step 2 — Create S3 Bucket
+> **Important:** These credentials expire after ~12 hours. If you see
+> `ExpiredTokenException` at any point, go to Section 13 to refresh them.
+> You do NOT need to redo any other steps — just refresh the credentials.
+
+---
+
+## 5. Step 2 — Create S3 Bucket
+
+Run these commands **in CloudShell** (credentials work automatically there):
 
 ```bash
-# Replace <yourname> with something unique e.g. mlpipeline-titanic-john2024
-aws s3 mb s3://mlpipeline-titanic-<yourname> --region ap-south-1
+# Choose a globally unique bucket name
+BUCKET="mlpipeline-titanic-<yourname>"    # CHANGE <yourname>
 
-# Create the three folders inside
-aws s3api put-object --bucket mlpipeline-titanic-<yourname> --key data/
-aws s3api put-object --bucket mlpipeline-titanic-<yourname> --key plots/
-aws s3api put-object --bucket mlpipeline-titanic-<yourname> --key mlflow-artifacts/
+# Create bucket
+aws s3 mb s3://$BUCKET --region ap-south-1
+
+# Create the three folders
+aws s3api put-object --bucket $BUCKET --key data/
+aws s3api put-object --bucket $BUCKET --key plots/
+aws s3api put-object --bucket $BUCKET --key mlflow-artifacts/
 
 # Verify
-aws s3 ls s3://mlpipeline-titanic-<yourname>/
+aws s3 ls s3://$BUCKET/
 ```
 
-> If `aws s3 mb` is also restricted, create the bucket manually:
-> AWS Console → S3 → Create Bucket → name it → region ap-south-1 → Create.
-> Then create folders `data/`, `plots/`, `mlflow-artifacts/` using the **Create folder** button.
+If `aws s3 mb` is restricted, create the bucket manually instead:
+1. AWS Console → **S3** → **Create Bucket**
+2. Name: `mlpipeline-titanic-<yourname>` | Region: `ap-south-1`
+3. All other settings default → **Create Bucket**
+4. Open bucket → **Create folder** → create: `data/` `plots/` `mlflow-artifacts/`
 
-### Step 3 — Upload Titanic dataset
+---
 
-1. Download `titanic.csv` from https://www.kaggle.com/datasets/yasserh/titanic-dataset
-2. Place it in your `mlpipeline/data/` folder
-3. Upload to S3:
+## 6. Step 3 — Upload Titanic Dataset
 
+1. Download `titanic.csv` from:
+   **https://www.kaggle.com/datasets/yasserh/titanic-dataset**
+
+2. Upload to S3 — two options:
+
+**Option A — AWS Console (easiest):**
+- AWS Console → S3 → your bucket → `data/` folder → **Upload** → select `titanic.csv`
+
+**Option B — from your local terminal** (after credentials are set):
 ```bash
-# Set your bucket name as a variable — use this throughout
-export S3_BUCKET="mlpipeline-titanic-<yourname>"    # Mac/Linux
-# On Windows CMD:  set S3_BUCKET=mlpipeline-titanic-<yourname>
-# On Windows PS:   $env:S3_BUCKET="mlpipeline-titanic-<yourname>"
-
 aws s3 cp data/titanic.csv s3://$S3_BUCKET/data/titanic.csv
 
 # Verify
@@ -193,33 +239,37 @@ aws s3 ls s3://$S3_BUCKET/data/
 
 ---
 
-## 6. Local Environment Setup
+## 7. Step 4 — Local Python Setup
 
-### Step 4 — Create project folder and virtual environment
+### Install Python
 
+Make sure Python 3.9+ is installed:
 ```bash
-# Create and enter project folder
-mkdir mlpipeline
-cd mlpipeline
-mkdir flows ml api data plots
-
-# Create virtual environment
-python -m venv venv        # Windows
-# OR
-python3 -m venv venv       # Mac/Linux
-
-# Activate virtual environment
-# Windows CMD:
-venv\Scripts\activate
-# Windows PowerShell:
-venv\Scripts\Activate.ps1
-# Mac/Linux:
-source venv/bin/activate
-
-# Your terminal prompt should now show (venv)
+python --version    # or python3 --version
 ```
 
-### Step 5 — Install all dependencies
+Download from https://python.org if needed.
+
+### Create project folder and virtual environment
+
+```bash
+mkdir mlpipeline
+cd mlpipeline
+mkdir flows ml api data
+
+# Create virtual environment
+python -m venv venv          # Windows
+python3 -m venv venv         # Mac/Linux
+
+# Activate
+venv\Scripts\activate        # Windows CMD
+venv\Scripts\Activate.ps1   # Windows PowerShell
+source venv/bin/activate     # Mac/Linux
+
+# Prompt should now show (venv)
+```
+
+### Install all dependencies
 
 ```bash
 pip install --upgrade pip
@@ -238,109 +288,84 @@ pip install \
   "python-multipart==0.0.9"
 ```
 
-Verify key installs:
+Verify:
 ```bash
-python -c "import prefect; print('prefect', prefect.__version__)"
-python -c "import mlflow; print('mlflow', mlflow.__version__)"
-python -c "import pandas; print('pandas', pandas.__version__)"
-```
-
-### Step 6 — Set environment variables
-
-**Mac/Linux** — add to `~/.bashrc` or `~/.zshrc` then run `source ~/.bashrc`:
-```bash
-export S3_BUCKET="mlpipeline-titanic-<yourname>"
-export AWS_DEFAULT_REGION="ap-south-1"
-export MLFLOW_TRACKING_URI="http://localhost:5000"
-export PREFECT_API_KEY=""      # Fill in after Step 8
-export PREFECT_API_URL=""      # Fill in after Step 8
-```
-
-**Windows CMD** — run each line, then restart terminal:
-```cmd
-setx S3_BUCKET "mlpipeline-titanic-<yourname>"
-setx AWS_DEFAULT_REGION "ap-south-1"
-setx MLFLOW_TRACKING_URI "http://localhost:5000"
-setx PREFECT_API_KEY ""
-setx PREFECT_API_URL ""
-```
-
-**Windows PowerShell** — add to your PowerShell profile:
-```powershell
-$env:S3_BUCKET = "mlpipeline-titanic-<yourname>"
-$env:AWS_DEFAULT_REGION = "ap-south-1"
-$env:MLFLOW_TRACKING_URI = "http://localhost:5000"
-$env:PREFECT_API_KEY = ""
-$env:PREFECT_API_URL = ""
+python -c "import prefect, mlflow, pandas, sklearn, boto3; print('All packages OK')"
 ```
 
 ---
 
-## 7. Prefect Cloud Setup
+## 8. Step 5 — Prefect Cloud Setup
 
-### Step 7 — Create account and workspace
+### Create account
 
 1. Go to **https://app.prefect.cloud** → Sign Up (free, no credit card)
-2. Create a **Workspace** → name it `mlpipeline`
-3. Go to **Settings** (bottom left) → **API Keys** → **+ Add API Key**
-   - Name: `local-agent`
-   - Expiry: leave as never
-   - Click **Create** → **copy the key immediately** (shown once only)
+2. You will land in the **default workspace** — this is all you need
 
-### Step 8 — Get your Prefect API URL
+### Get API key and URL
 
-1. In Prefect Cloud → **Settings** → **API Keys**
-2. Your workspace API URL is shown on this page. It looks like:
+1. Click **Settings** (gear icon, bottom-left) → **API Keys** → **+ Add API Key**
+2. Name: `local-agent` → **Create** → **copy the key immediately** (shown once only)
+3. Your API URL is shown on the same Settings page. It looks like:
    ```
    https://api.prefect.cloud/api/accounts/abc12345-xxxx-xxxx-xxxx-xxxxxxxxxxxx/workspaces/def67890-xxxx-xxxx-xxxx-xxxxxxxxxxxx
    ```
-3. Copy this full URL
 
-Now go back and fill in the environment variables from Step 6:
+### Set environment variables
+
+Go back to your local terminal and fill in these two values:
+
+**Mac/Linux:**
 ```bash
 export PREFECT_API_KEY="pnu_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 export PREFECT_API_URL="https://api.prefect.cloud/api/accounts/YOUR_ACCOUNT_ID/workspaces/YOUR_WORKSPACE_ID"
 ```
 
-### Step 9 — Connect your machine to Prefect Cloud
-
-```bash
-# Make sure venv is active
-source venv/bin/activate    # Mac/Linux
-# venv\Scripts\activate      # Windows
-
-prefect cloud login --key $PREFECT_API_KEY
-# When prompted: select your mlpipeline workspace
-
-# Verify connection
-prefect cloud workspace ls
-# Should show your workspace marked as (active)
+**Windows CMD:**
+```cmd
+set PREFECT_API_KEY=pnu_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+set PREFECT_API_URL=https://api.prefect.cloud/api/accounts/YOUR_ACCOUNT_ID/workspaces/YOUR_WORKSPACE_ID
 ```
 
-### Step 10 — Create Work Pool
+**Windows PowerShell:**
+```powershell
+$env:PREFECT_API_KEY = "pnu_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+$env:PREFECT_API_URL = "https://api.prefect.cloud/api/accounts/YOUR_ACCOUNT_ID/workspaces/YOUR_WORKSPACE_ID"
+```
+
+### Connect local machine to Prefect Cloud
+
+```bash
+source venv/bin/activate    # or venv\Scripts\activate on Windows
+
+prefect cloud login --key $PREFECT_API_KEY
+# Select the default workspace when prompted
+
+prefect cloud workspace ls
+# Should show your default workspace with a * marking it active
+```
+
+### Create work pool
 
 ```bash
 prefect work-pool create "local-work-pool" --type process
 
-# Verify
 prefect work-pool ls
-# Should show local-work-pool with status READY
+# Should show local-work-pool as READY
 ```
-
-Also verify in Prefect Cloud UI: **Work Pools** → `local-work-pool` should appear.
 
 ---
 
-## 8. Sub-Objective 1 — Data Pipeline
+## 9. Sub-Objective 1 — Data Pipeline Code
 
-Create the file `flows/data_pipeline.py` — copy this entire block:
+Create `flows/data_pipeline.py`:
 
 ```python
 """
 CCZG506 Assignment I — Sub-Objective 1
 Prefect Flow: Data Ingestion → Preprocessing → EDA
 Scheduled every 3 minutes via Prefect Cloud.
-All data and plots stored on AWS S3.
+Data and plots stored on AWS S3.
 Logs stream live to app.prefect.cloud dashboard.
 """
 
@@ -351,7 +376,7 @@ from prefect.server.schemas.schedules import CronSchedule
 import pandas as pd
 import numpy as np
 import matplotlib
-matplotlib.use("Agg")   # Non-interactive backend — required for server/headless environments
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.preprocessing import MinMaxScaler
@@ -415,7 +440,7 @@ def ingest_data() -> dict:
     logger.info(f"First 3 rows:\n{df.head(3).to_string()}")
 
     total_missing = int(df.isnull().sum().sum())
-    logger.info(f"Total missing values across all columns: {total_missing}")
+    logger.info(f"Total missing values across dataset: {total_missing}")
     logger.info("TASK 1.2: DATA INGESTION — COMPLETED SUCCESSFULLY")
 
     return {
@@ -430,7 +455,7 @@ def ingest_data() -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 @task(
     name="Data Preprocessing",
-    description="Display stats, check/impute missing values, normalize, save to S3.",
+    description="Summary stats, impute missing values, normalize, save to S3.",
     retries=2,
     retry_delay_seconds=30,
     tags=["preprocessing", "s3"],
@@ -445,7 +470,7 @@ def preprocess_data(ingestion_stats: dict) -> dict:
     df = read_csv_from_s3(S3_DATA_KEY)
 
     # ── 1. Summary Statistics ─────────────────────────────────────────────────
-    logger.info("--- Summary Statistics (describe) ---")
+    logger.info("--- Summary Statistics ---")
     logger.info(f"\n{df.describe().round(4).to_string()}")
 
     # ── 2. Data Types ─────────────────────────────────────────────────────────
@@ -453,12 +478,12 @@ def preprocess_data(ingestion_stats: dict) -> dict:
     for col, dtype in df.dtypes.items():
         logger.info(f"  {col:<15} : {dtype}")
 
-    # ── 3. Missing Values Before Imputation ───────────────────────────────────
+    # ── 3. Check Missing Values ───────────────────────────────────────────────
     missing = df.isnull().sum()
     logger.info("--- Missing Values (Before Imputation) ---")
     for col, cnt in missing[missing > 0].items():
         pct = (cnt / len(df)) * 100
-        logger.info(f"  {col:<15} : {cnt} missing  ({pct:.1f}% of rows)")
+        logger.info(f"  {col:<15} : {cnt} missing ({pct:.1f}% of rows)")
 
     # ── 4. Impute Numeric Columns with Median ─────────────────────────────────
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
@@ -484,16 +509,16 @@ def preprocess_data(ingestion_stats: dict) -> dict:
     remaining_nulls = int(df.isnull().sum().sum())
     logger.info(f"  Remaining null values after imputation: {remaining_nulls}")
 
-    # ── 6. Normalize Numeric Columns (MinMaxScaler → 0 to 1) ─────────────────
+    # ── 6. Normalize Numeric Columns ─────────────────────────────────────────
     cols_to_scale = ["Age", "Fare", "SibSp", "Parch"]
     scaler = MinMaxScaler()
     df[cols_to_scale] = scaler.fit_transform(df[cols_to_scale])
-    logger.info(f"  Normalized columns (MinMaxScaler, range 0–1): {cols_to_scale}")
+    logger.info(f"  Normalized (MinMaxScaler, 0–1): {cols_to_scale}")
     logger.info(f"  Post-normalization stats:\n{df[cols_to_scale].describe().round(4).to_string()}")
 
-    # ── 7. Save processed data to S3 ──────────────────────────────────────────
+    # ── 7. Save to S3 ─────────────────────────────────────────────────────────
     write_csv_to_s3(df, S3_PROC_KEY)
-    logger.info(f"  Processed dataset saved → s3://{S3_BUCKET}/{S3_PROC_KEY}")
+    logger.info(f"  Saved → s3://{S3_BUCKET}/{S3_PROC_KEY}")
 
     logger.info("TASK 1.3: DATA PREPROCESSING — COMPLETED SUCCESSFULLY")
     return {
@@ -529,7 +554,7 @@ def perform_eda(preprocessing_stats: dict) -> dict:
     logger.info("--- Full Correlation Matrix ---")
     logger.info(f"\n{corr.round(3).to_string()}")
 
-    # ── 2. Correlation with Target ────────────────────────────────────────────
+    # ── 2. Correlations with Target ───────────────────────────────────────────
     target_corr = corr["Survived"].abs().sort_values(ascending=False)
     logger.info("--- Absolute Correlation with Target (Survived) ---")
     for feat, val in target_corr.items():
@@ -539,9 +564,7 @@ def perform_eda(preprocessing_stats: dict) -> dict:
     # ── 3. Encoding Categorical Features ─────────────────────────────────────
     df["Sex_encoded"]      = df["Sex"].map({"male": 0, "female": 1})
     df["Embarked_encoded"] = df["Embarked"].map({"S": 0, "C": 1, "Q": 2}).fillna(-1).astype(int)
-    logger.info("Encoding complete:")
-    logger.info("  Sex      → Sex_encoded      {male: 0, female: 1}")
-    logger.info("  Embarked → Embarked_encoded  {S: 0, C: 1, Q: 2}")
+    logger.info("Encoding: Sex → {male:0, female:1}  |  Embarked → {S:0, C:1, Q:2}")
 
     # ── 4. Binning Age ────────────────────────────────────────────────────────
     df["Age_bin"] = pd.cut(
@@ -552,7 +575,7 @@ def perform_eda(preprocessing_stats: dict) -> dict:
     for label, count in df["Age_bin"].value_counts().sort_index().items():
         logger.info(f"  {str(label):<15} : {count} passengers")
 
-    # ── 5. Feature Importance (correlation with target) ───────────────────────
+    # ── 5. Feature Importance ─────────────────────────────────────────────────
     numeric_df2 = df.select_dtypes(include=[np.number])
     feature_imp = (
         numeric_df2.corr()["Survived"].abs()
@@ -563,7 +586,7 @@ def perform_eda(preprocessing_stats: dict) -> dict:
     for feat, score in feature_imp.items():
         logger.info(f"  {feat:<25} : {score:.4f}")
 
-    # ── 6. Summary Stats ──────────────────────────────────────────────────────
+    # ── 6. Survival Stats ─────────────────────────────────────────────────────
     survival_rate = df["Survived"].mean() * 100
     logger.info(f"Overall Survival Rate : {survival_rate:.1f}%")
     logger.info(f"By Sex:\n{df.groupby('Sex')['Survived'].mean().mul(100).round(1).to_string()}%")
@@ -604,13 +627,11 @@ def perform_eda(preprocessing_stats: dict) -> dict:
         kind="bar", ax=axes[1],
         color=["#3498db", "#f39c12", "#9b59b6"], edgecolor="black", width=0.5
     )
-    axes[1].set_title("Passenger Class Distribution",
-                      fontsize=13, fontweight="bold")
+    axes[1].set_title("Passenger Class Distribution", fontsize=13, fontweight="bold")
     axes[1].set_xlabel("Passenger Class")
     axes[1].set_ylabel("Count")
     axes[1].set_xticklabels(["1st Class", "2nd Class", "3rd Class"], rotation=0)
-    fig.suptitle("Univariate Analysis — Titanic Dataset",
-                 fontsize=15, fontweight="bold")
+    fig.suptitle("Univariate Analysis — Titanic Dataset", fontsize=15, fontweight="bold")
     plt.tight_layout()
     key = f"{S3_PLOTS_PREFIX}2_univariate_analysis.png"
     upload_plot_to_s3(fig, key)
@@ -629,22 +650,18 @@ def perform_eda(preprocessing_stats: dict) -> dict:
     axes[0].set_xlabel("Gender")
     axes[0].set_ylabel("Count")
     axes[0].legend(title="Survived")
-
     surv_class = df.groupby("Pclass")["Survived"].mean() * 100
     bars = axes[1].bar(
         surv_class.index.astype(str), surv_class.values,
         color=["#3498db", "#f39c12", "#9b59b6"], edgecolor="black", width=0.5
     )
-    axes[1].set_title("Survival Rate by Passenger Class",
-                      fontsize=13, fontweight="bold")
+    axes[1].set_title("Survival Rate by Passenger Class", fontsize=13, fontweight="bold")
     axes[1].set_xlabel("Passenger Class")
     axes[1].set_ylabel("Survival Rate (%)")
     axes[1].set_ylim(0, 100)
     for bar, val in zip(bars, surv_class.values):
-        axes[1].text(
-            bar.get_x() + bar.get_width() / 2,
-            val + 1.5, f"{val:.1f}%", ha="center", fontsize=11
-        )
+        axes[1].text(bar.get_x() + bar.get_width() / 2,
+                     val + 1.5, f"{val:.1f}%", ha="center", fontsize=11)
     fig.suptitle("Bivariate Analysis — Survival by Demographics",
                  fontsize=15, fontweight="bold")
     plt.tight_layout()
@@ -674,10 +691,9 @@ def perform_eda(preprocessing_stats: dict) -> dict:
     plots_saved.append(key)
     logger.info(f"Plot 4 saved → s3://{S3_BUCKET}/{key}")
 
-    # ── Plot 5: Feature Importance Bar Chart ──────────────────────────────────
+    # ── Plot 5: Feature Importance ────────────────────────────────────────────
     fig, ax = plt.subplots(figsize=(10, 5))
-    feature_imp.plot(kind="bar", ax=ax, color="#3498db",
-                     edgecolor="black", width=0.6)
+    feature_imp.plot(kind="bar", ax=ax, color="#3498db", edgecolor="black", width=0.6)
     ax.set_title("Feature Importance — |Correlation| with Survived",
                  fontsize=13, fontweight="bold")
     ax.set_xlabel("Feature")
@@ -690,32 +706,24 @@ def perform_eda(preprocessing_stats: dict) -> dict:
     plots_saved.append(key)
     logger.info(f"Plot 5 saved → s3://{S3_BUCKET}/{key}")
 
-    logger.info(f"All {len(plots_saved)} EDA plots uploaded to S3 successfully.")
+    logger.info(f"All {len(plots_saved)} plots uploaded to S3.")
     logger.info("TASK 1.4: EDA — COMPLETED SUCCESSFULLY")
-    return {
-        "plots_saved":        plots_saved,
-        "survival_rate_pct":  round(survival_rate, 2),
-    }
+    return {"plots_saved": plots_saved, "survival_rate_pct": round(survival_rate, 2)}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# FLOW — Ties all 3 tasks together (Sub-Objective 1.5: DataOps)
+# FLOW (Sub-Objective 1.5 — DataOps)
 # ─────────────────────────────────────────────────────────────────────────────
 @flow(
     name="titanic-data-pipeline",
     description=(
         "End-to-end Titanic data pipeline: ingestion → preprocessing → EDA. "
-        "Scheduled every 3 minutes via Prefect Cloud. Artifacts on S3."
+        "Scheduled every 3 minutes via Prefect Cloud. Artifacts on AWS S3."
     ),
     version="1.0",
     log_prints=True,
 )
 def data_pipeline():
-    """
-    Orchestrates all 3 tasks in sequence.
-    Each task's return value is passed to the next so Prefect Cloud
-    can display data lineage and dependency graph.
-    """
     ingestion_stats     = ingest_data()
     preprocessing_stats = preprocess_data(ingestion_stats)
     eda_stats           = perform_eda(preprocessing_stats)
@@ -727,16 +735,15 @@ def data_pipeline():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# DEPLOYMENT — Run this script once to register the schedule on Prefect Cloud
-# python flows/data_pipeline.py
+# DEPLOYMENT — run once: python flows/data_pipeline.py
 # ─────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     deployment = Deployment.build_from_flow(
         flow=data_pipeline,
         name="titanic-pipeline-every-3min",
-        work_pool_name="local-work-pool",      # runs on your local machine
+        work_pool_name="local-work-pool",
         schedule=CronSchedule(
-            cron="*/3 * * * *",                # Every 3 minutes ✅
+            cron="*/3 * * * *",       # Every 3 minutes ✅
             timezone="Asia/Kolkata",
         ),
         tags=["DataOps", "Titanic", "CCZG506"],
@@ -752,9 +759,9 @@ if __name__ == "__main__":
 
 ---
 
-## 9. Sub-Objective 2 — ML Pipeline
+## 10. Sub-Objective 2 — ML Pipeline Code
 
-Create the file `ml/ml_pipeline.py`:
+Create `ml/ml_pipeline.py`:
 
 ```python
 """
@@ -762,7 +769,7 @@ CCZG506 Assignment I — Sub-Objective 2
 MLflow Training Pipeline.
 Algorithms: Random Forest + Logistic Regression
 Metrics logged to MLflow. Model artifacts stored on S3.
-UI available at http://localhost:5000
+UI: http://localhost:5000
 """
 
 import pandas as pd
@@ -790,42 +797,33 @@ AWS_REGION  = os.environ.get("AWS_DEFAULT_REGION", "ap-south-1")
 MLFLOW_URI  = os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000")
 EXPERIMENT  = "Titanic_Survival_Prediction"
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s"
-)
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("MLPipeline")
 
-# ─── MLflow Setup ─────────────────────────────────────────────────────────────
 mlflow.set_tracking_uri(MLFLOW_URI)
 os.environ["MLFLOW_ARTIFACT_ROOT"] = f"s3://{S3_BUCKET}/mlflow-artifacts"
 mlflow.set_experiment(EXPERIMENT)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 2.1 — MODEL PREPARATION
-# ─────────────────────────────────────────────────────────────────────────────
 def load_and_prepare_data():
     logger.info("=" * 60)
     logger.info("STEP 2.1: MODEL PREPARATION")
     logger.info("=" * 60)
 
-    # Load from S3
     s3  = boto3.client("s3", region_name=AWS_REGION)
     obj = s3.get_object(Bucket=S3_BUCKET, Key=S3_DATA_KEY)
     df  = pd.read_csv(io.BytesIO(obj["Body"].read()))
     logger.info(f"Loaded {df.shape[0]} rows from s3://{S3_BUCKET}/{S3_DATA_KEY}")
 
-    # Preprocessing
     df["Age"].fillna(df["Age"].median(), inplace=True)
     df["Fare"].fillna(df["Fare"].median(), inplace=True)
     df["Embarked"].fillna(df["Embarked"].mode()[0], inplace=True)
     df.drop(columns=["Cabin", "Name", "Ticket", "PassengerId"], inplace=True)
 
-    # Encode categorical
     le = LabelEncoder()
-    df["Sex"]      = le.fit_transform(df["Sex"])       # male=1, female=0
-    df["Embarked"] = le.fit_transform(df["Embarked"])  # S/C/Q → integers
+    df["Sex"]      = le.fit_transform(df["Sex"])
+    df["Embarked"] = le.fit_transform(df["Embarked"])
 
     feature_cols = ["Pclass", "Sex", "Age", "SibSp", "Parch", "Fare", "Embarked"]
     X = df[feature_cols]
@@ -837,18 +835,12 @@ def load_and_prepare_data():
     return X, y, feature_cols
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 2.2 + 2.3 + 2.4 — TRAIN, EVALUATE, LOG TO MLFLOW
-# ─────────────────────────────────────────────────────────────────────────────
 def train_and_log(model, model_name, X_train, X_test,
                   y_train, y_test, feature_cols):
-    logger.info(f"\n{'='*60}")
-    logger.info(f"Training: {model_name}")
-    logger.info(f"{'='*60}")
+    logger.info(f"\n{'='*60}\nTraining: {model_name}\n{'='*60}")
 
     with mlflow.start_run(run_name=model_name) as run:
 
-        # ── Log hyperparameters ───────────────────────────────────────────────
         mlflow.log_param("model_name",    model_name)
         mlflow.log_param("train_samples", len(X_train))
         mlflow.log_param("test_samples",  len(X_test))
@@ -866,12 +858,12 @@ def train_and_log(model, model_name, X_train, X_test,
             mlflow.log_param("solver",   model.solver)
             mlflow.log_param("C",        model.C)
 
-        # ── 2.2 Train ─────────────────────────────────────────────────────────
+        # Train
         model.fit(X_train, y_train)
         y_pred      = model.predict(X_test)
         y_pred_prob = model.predict_proba(X_test)[:, 1]
 
-        # ── 2.3 + 2.4 Compute and log metrics ────────────────────────────────
+        # Metrics
         accuracy    = accuracy_score(y_test, y_pred)
         precision   = precision_score(y_test, y_pred, zero_division=0)
         recall      = recall_score(y_test, y_pred, zero_division=0)
@@ -885,7 +877,7 @@ def train_and_log(model, model_name, X_train, X_test,
         tn, fp, fn, tp = cm.ravel()
         specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
 
-        # Log all metrics (satisfies 4+ metric requirement) ✅
+        # Log all metrics ✅ (satisfies 4+ metric requirement)
         mlflow.log_metric("accuracy",         round(accuracy,    4))
         mlflow.log_metric("precision",        round(precision,   4))
         mlflow.log_metric("recall",           round(recall,      4))
@@ -899,15 +891,14 @@ def train_and_log(model, model_name, X_train, X_test,
         mlflow.log_metric("false_positives",  int(fp))
         mlflow.log_metric("false_negatives",  int(fn))
 
-        # Save model artifact to S3
+        # Save model to S3
         mlflow.sklearn.log_model(
             sk_model=model,
             artifact_path="model",
             registered_model_name=model_name,
         )
 
-        # Print results
-        logger.info(f"  Accuracy          : {accuracy:.4f}  ({accuracy*100:.2f}%)")
+        logger.info(f"  Accuracy          : {accuracy:.4f} ({accuracy*100:.2f}%)")
         logger.info(f"  Precision         : {precision:.4f}")
         logger.info(f"  Recall            : {recall:.4f}")
         logger.info(f"  F1 Score          : {f1:.4f}")
@@ -926,18 +917,12 @@ def train_and_log(model, model_name, X_train, X_test,
         logger.info(f"  MLflow Run ID : {run.info.run_id}")
 
         return run.info.run_id, {
-            "accuracy":  accuracy,
-            "precision": precision,
-            "recall":    recall,
-            "f1_score":  f1,
-            "roc_auc":   roc_auc,
-            "run_id":    run.info.run_id,
+            "accuracy": accuracy, "precision": precision,
+            "recall": recall,    "f1_score": f1,
+            "roc_auc": roc_auc,  "run_id": run.info.run_id,
         }
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# MAIN
-# ─────────────────────────────────────────────────────────────────────────────
 def main():
     logger.info("\n" + "=" * 60)
     logger.info("CCZG506 — ML PIPELINE STARTING")
@@ -945,45 +930,34 @@ def main():
 
     X, y, feature_cols = load_and_prepare_data()
 
-    # 2.2 — Stratified 70% train / 30% test split
+    # 70/30 stratified split
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.30, random_state=42, stratify=y
     )
-    logger.info(f"\nData Split → Train: {len(X_train)} rows | Test: {len(X_test)} rows")
+    logger.info(f"\nSplit → Train: {len(X_train)} | Test: {len(X_test)}")
 
-    # Scale features for Logistic Regression
     scaler     = StandardScaler()
     X_train_sc = scaler.fit_transform(X_train)
     X_test_sc  = scaler.transform(X_test)
 
     results = {}
 
-    # ── Algorithm 1: Random Forest ────────────────────────────────────────────
+    # Algorithm 1: Random Forest
     rf = RandomForestClassifier(
-        n_estimators=100,
-        max_depth=8,
-        min_samples_split=5,
-        random_state=42,
-        n_jobs=-1,
+        n_estimators=100, max_depth=8,
+        min_samples_split=5, random_state=42, n_jobs=-1,
     )
     _, results["RandomForest"] = train_and_log(
-        rf, "RandomForest",
-        X_train, X_test, y_train, y_test, feature_cols
+        rf, "RandomForest", X_train, X_test, y_train, y_test, feature_cols
     )
 
-    # ── Algorithm 2: Logistic Regression ──────────────────────────────────────
-    lr = LogisticRegression(
-        C=1.0,
-        max_iter=1000,
-        solver="lbfgs",
-        random_state=42,
-    )
+    # Algorithm 2: Logistic Regression
+    lr = LogisticRegression(C=1.0, max_iter=1000, solver="lbfgs", random_state=42)
     _, results["LogisticRegression"] = train_and_log(
         lr, "LogisticRegression",
         X_train_sc, X_test_sc, y_train, y_test, feature_cols
     )
 
-    # ── Comparison Summary ────────────────────────────────────────────────────
     logger.info("\n" + "=" * 60)
     logger.info("MODEL COMPARISON SUMMARY")
     logger.info("=" * 60)
@@ -997,8 +971,7 @@ def main():
         )
     best = max(results, key=lambda k: results[k]["f1_score"])
     logger.info(f"\nBest Model (by F1) : {best}")
-    logger.info(f"View results at    : http://localhost:5000")
-    logger.info("=" * 60)
+    logger.info(f"MLflow UI          : http://localhost:5000")
 
 
 if __name__ == "__main__":
@@ -1007,16 +980,16 @@ if __name__ == "__main__":
 
 ---
 
-## 10. Sub-Objective 3 — API Access
+## 11. Sub-Objective 3 — API Code
 
-Create the file `api/main.py`:
+Create `api/main.py`:
 
 ```python
 """
 CCZG506 Assignment I — Sub-Objective 3
 FastAPI: exposes Prefect Cloud pipeline details + MLflow model details.
 Satisfies 3.1 (Built-in APIs) and 3.2 (Display Application Details).
-Swagger UI at http://localhost:8000/docs
+Swagger UI: http://localhost:8000/docs
 """
 
 from fastapi import FastAPI, HTTPException
@@ -1040,9 +1013,8 @@ mlflow_client = MlflowClient(MLFLOW_URI)
 app = FastAPI(
     title="CCZG506 Cloud ML Application API",
     description=(
-        "REST APIs exposing Prefect Cloud pipeline details and "
-        "MLflow model deployment details.\n\n"
-        "Assignment I — BITS Pilani WILP  |  CCZG506"
+        "REST APIs exposing Prefect Cloud pipeline details and MLflow "
+        "model deployment details.  Assignment I — BITS Pilani WILP."
     ),
     version="1.0.0",
     docs_url="/docs",
@@ -1050,115 +1022,69 @@ app = FastAPI(
 )
 
 def _ph():
-    """Prefect Cloud auth headers."""
-    return {
-        "Authorization": f"Bearer {PREFECT_API_KEY}",
-        "Content-Type":  "application/json",
-    }
+    return {"Authorization": f"Bearer {PREFECT_API_KEY}",
+            "Content-Type":  "application/json"}
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# HEALTH CHECK
-# ─────────────────────────────────────────────────────────────────────────────
 @app.get("/health", tags=["System"],
-         summary="Check status of all connected services")
+         summary="Status of all connected services")
 def health_check():
-    """Returns status of API, MLflow, Prefect Cloud, and S3."""
-    status = {
-        "api":           "ok",
-        "mlflow":        "unknown",
-        "prefect_cloud": "unknown",
-        "s3":            "unknown",
-    }
+    status = {"api": "ok", "mlflow": "unknown",
+              "prefect_cloud": "unknown", "s3": "unknown"}
     try:
         mlflow_client.search_experiments()
         status["mlflow"] = "ok"
     except Exception:
-        status["mlflow"] = "unreachable — is MLflow server running on port 5000?"
-
+        status["mlflow"] = "unreachable"
     try:
-        r = requests.get(
-            f"{PREFECT_API_URL}/health",
-            headers=_ph(), timeout=5
-        )
+        r = requests.get(f"{PREFECT_API_URL}/health", headers=_ph(), timeout=5)
         status["prefect_cloud"] = "ok" if r.status_code == 200 else "degraded"
     except Exception:
-        status["prefect_cloud"] = "unreachable — check PREFECT_API_URL env var"
-
+        status["prefect_cloud"] = "unreachable"
     try:
         boto3.client("s3", region_name=AWS_REGION).head_bucket(Bucket=S3_BUCKET)
         status["s3"] = "ok"
     except Exception:
-        status["s3"] = "unreachable — check AWS credentials"
-
+        status["s3"] = "unreachable"
     return status
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 3.1 + 3.2 — PREFECT CLOUD: Flow & Deployment Details
-# ─────────────────────────────────────────────────────────────────────────────
-@app.get(
-    "/prefect/flows",
-    tags=["Prefect Cloud — Flow Details"],
-    summary="App Detail 1: All registered Prefect flows",
-)
+@app.get("/prefect/flows", tags=["Prefect Cloud — Flow Details"],
+         summary="App Detail 1: All registered Prefect flows")
 def list_flows():
-    """
-    Retrieves all flows registered on Prefect Cloud workspace.
-    Shows flow name, ID, creation time, and tags.
-    """
+    """All flows registered on Prefect Cloud — name, ID, tags."""
     if not PREFECT_API_URL:
         raise HTTPException(503, "PREFECT_API_URL env var not set.")
     try:
-        r = requests.post(
-            f"{PREFECT_API_URL}/flows/filter",
-            headers=_ph(),
-            json={"limit": 25},
-            timeout=10,
-        )
+        r = requests.post(f"{PREFECT_API_URL}/flows/filter",
+                          headers=_ph(), json={"limit": 25}, timeout=10)
         r.raise_for_status()
-        flows = r.json()
         return {
-            "total_flows": len(flows),
-            "flows": [
-                {
-                    "id":      f.get("id"),
-                    "name":    f.get("name"),
-                    "created": f.get("created"),
-                    "updated": f.get("updated"),
-                    "tags":    f.get("tags", []),
-                }
-                for f in flows
-            ],
+            "total_flows": len(r.json()),
+            "flows": [{"id": f.get("id"), "name": f.get("name"),
+                        "created": f.get("created"), "tags": f.get("tags", [])}
+                      for f in r.json()],
         }
     except Exception as e:
         raise HTTPException(500, str(e))
 
 
-@app.get(
-    "/prefect/deployments",
-    tags=["Prefect Cloud — Flow Details"],
-    summary="App Detail 2: Deployments with schedule and work pool info",
-)
+@app.get("/prefect/deployments", tags=["Prefect Cloud — Flow Details"],
+         summary="App Detail 2: Deployments with schedule info")
 def list_deployments():
     """
-    Retrieves all deployments from Prefect Cloud.
-    Shows schedule (cron = */3 * * * *), work pool, and active status.
-    This directly satisfies 'flow/deployment details via Built-in APIs'.
+    All deployments from Prefect Cloud.
+    Shows schedule (*/3 * * * *), work pool, active status.
+    Directly satisfies 'flow/deployment details via Built-in APIs'.
     """
     if not PREFECT_API_URL:
         raise HTTPException(503, "PREFECT_API_URL env var not set.")
     try:
-        r = requests.post(
-            f"{PREFECT_API_URL}/deployments/filter",
-            headers=_ph(),
-            json={"limit": 25},
-            timeout=10,
-        )
+        r = requests.post(f"{PREFECT_API_URL}/deployments/filter",
+                          headers=_ph(), json={"limit": 25}, timeout=10)
         r.raise_for_status()
-        deployments = r.json()
         return {
-            "total_deployments": len(deployments),
+            "total_deployments": len(r.json()),
             "deployments": [
                 {
                     "id":                 d.get("id"),
@@ -1173,89 +1099,60 @@ def list_deployments():
                     "tags":           d.get("tags", []),
                     "created":        d.get("created"),
                 }
-                for d in deployments
+                for d in r.json()
             ],
         }
     except Exception as e:
         raise HTTPException(500, str(e))
 
 
-@app.get(
-    "/prefect/flow-runs",
-    tags=["Prefect Cloud — Flow Details"],
-    summary="App Detail 3: Recent flow run history",
-)
+@app.get("/prefect/flow-runs", tags=["Prefect Cloud — Flow Details"],
+         summary="App Detail 3: Recent flow run history")
 def get_flow_runs(limit: int = 10):
-    """
-    Retrieves recent pipeline execution history from Prefect Cloud.
-    Shows state (Completed/Failed/Running), start time, and duration.
-    """
+    """Recent pipeline executions — state, timing, duration."""
     if not PREFECT_API_URL:
         raise HTTPException(503, "PREFECT_API_URL env var not set.")
     try:
-        r = requests.post(
-            f"{PREFECT_API_URL}/flow_runs/filter",
-            headers=_ph(),
-            json={"limit": limit, "sort": "START_TIME_DESC"},
-            timeout=10,
-        )
+        r = requests.post(f"{PREFECT_API_URL}/flow_runs/filter",
+                          headers=_ph(),
+                          json={"limit": limit, "sort": "START_TIME_DESC"},
+                          timeout=10)
         r.raise_for_status()
-        runs = r.json()
         return {
-            "total_runs": len(runs),
+            "total_runs": len(r.json()),
             "runs": [
                 {
-                    "id":             run.get("id"),
-                    "name":           run.get("name"),
-                    "state": {
-                        "type": run.get("state", {}).get("type"),
-                        "name": run.get("state", {}).get("name"),
-                    },
+                    "id":   run.get("id"),
+                    "name": run.get("name"),
+                    "state": {"type": run.get("state", {}).get("type"),
+                               "name": run.get("state", {}).get("name")},
                     "start_time":     run.get("start_time"),
                     "end_time":       run.get("end_time"),
                     "total_run_time": run.get("total_run_time"),
                     "tags":           run.get("tags", []),
                 }
-                for run in runs
+                for run in r.json()
             ],
         }
     except Exception as e:
         raise HTTPException(500, str(e))
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 3.1 + 3.2 — MLFLOW: Model Deployment Details
-# ─────────────────────────────────────────────────────────────────────────────
-@app.get(
-    "/mlflow/experiment",
-    tags=["MLflow — Model Details"],
-    summary="App Detail 4: ML experiment with all model metrics",
-)
+@app.get("/mlflow/experiment", tags=["MLflow — Model Details"],
+         summary="App Detail 4: ML experiment with all model metrics")
 def get_experiment():
-    """
-    Retrieves the ML experiment from MLflow showing both models
-    and all logged metrics (accuracy, precision, recall, F1, ROC-AUC etc.)
-    """
+    """Both model runs with metrics: accuracy, precision, recall, F1, ROC-AUC."""
     try:
         exp = mlflow_client.get_experiment_by_name(EXPERIMENT_NAME)
         if not exp:
-            raise HTTPException(
-                404,
-                f"Experiment '{EXPERIMENT_NAME}' not found. "
-                "Run ml/ml_pipeline.py first."
-            )
+            raise HTTPException(404, "Run ml/ml_pipeline.py first.")
         runs = mlflow_client.search_runs(
             experiment_ids=[exp.experiment_id],
-            order_by=["start_time DESC"],
-            max_results=20,
+            order_by=["start_time DESC"], max_results=20,
         )
         return {
-            "experiment": {
-                "id":                exp.experiment_id,
-                "name":              exp.name,
-                "artifact_location": exp.artifact_location,
-                "lifecycle_stage":   exp.lifecycle_stage,
-            },
+            "experiment": {"id": exp.experiment_id, "name": exp.name,
+                           "artifact_location": exp.artifact_location},
             "total_runs": len(runs),
             "model_runs": [
                 {
@@ -1264,18 +1161,13 @@ def get_experiment():
                     "status":     r.info.status,
                     "metrics": {
                         k: round(r.data.metrics.get(k, 0), 4)
-                        for k in [
-                            "accuracy", "precision", "recall",
-                            "f1_score", "roc_auc",
-                            "cv_mean_accuracy", "specificity",
-                        ]
+                        for k in ["accuracy", "precision", "recall",
+                                  "f1_score", "roc_auc",
+                                  "cv_mean_accuracy", "specificity"]
                     },
-                    "params": {
-                        "train_pct":  r.data.params.get("train_pct"),
-                        "test_pct":   r.data.params.get("test_pct"),
-                        "features":   r.data.params.get("features"),
-                        "n_features": r.data.params.get("n_features"),
-                    },
+                    "params": {"train_pct":  r.data.params.get("train_pct"),
+                               "test_pct":   r.data.params.get("test_pct"),
+                               "n_features": r.data.params.get("n_features")},
                 }
                 for r in runs
             ],
@@ -1286,16 +1178,10 @@ def get_experiment():
         raise HTTPException(500, str(e))
 
 
-@app.get(
-    "/mlflow/models",
-    tags=["MLflow — Model Details"],
-    summary="App Detail 5: Registered models and deployment versions",
-)
+@app.get("/mlflow/models", tags=["MLflow — Model Details"],
+         summary="App Detail 5: Registered models and versions")
 def list_registered_models():
-    """
-    Lists models from MLflow Model Registry.
-    Shows name, version, stage (None/Staging/Production), and S3 artifact path.
-    """
+    """Model Registry — name, version, stage (None/Staging/Production), S3 path."""
     try:
         models = mlflow_client.search_registered_models()
         return {
@@ -1305,13 +1191,9 @@ def list_registered_models():
                     "name":    m.name,
                     "updated": m.last_updated_timestamp,
                     "versions": [
-                        {
-                            "version": v.version,
-                            "stage":   v.current_stage,
-                            "status":  v.status,
-                            "run_id":  v.run_id,
-                            "source":  v.source,
-                        }
+                        {"version": v.version, "stage": v.current_stage,
+                         "status": v.status,   "run_id": v.run_id,
+                         "source": v.source}
                         for v in m.latest_versions
                     ],
                 }
@@ -1322,13 +1204,10 @@ def list_registered_models():
         raise HTTPException(500, str(e))
 
 
-@app.get(
-    "/s3/artifacts",
-    tags=["S3 — Storage"],
-    summary="All files in S3 bucket (data, plots, model artifacts)",
-)
+@app.get("/s3/artifacts", tags=["S3 — Storage"],
+         summary="All files stored in S3 (data, plots, model artifacts)")
 def list_s3_artifacts():
-    """Lists everything stored in S3 — dataset, processed data, plots, models."""
+    """Lists all objects in the S3 bucket."""
     try:
         s3   = boto3.client("s3", region_name=AWS_REGION)
         resp = s3.list_objects_v2(Bucket=S3_BUCKET)
@@ -1337,11 +1216,8 @@ def list_s3_artifacts():
             "bucket":        S3_BUCKET,
             "total_objects": len(objs),
             "objects": [
-                {
-                    "key":           o["Key"],
-                    "size_bytes":    o["Size"],
-                    "last_modified": o["LastModified"].isoformat(),
-                }
+                {"key":  o["Key"], "size_bytes": o["Size"],
+                 "last_modified": o["LastModified"].isoformat()}
                 for o in sorted(objs, key=lambda x: x["Key"])
             ],
         }
@@ -1351,24 +1227,25 @@ def list_s3_artifacts():
 
 ---
 
-## 11. Run Everything — Step by Step
+## 12. Run Everything — Step by Step
 
-You need **4 terminal windows** open simultaneously. Make sure your virtual environment is active in every terminal.
+Open **4 terminal windows**. In every terminal, navigate to the project folder
+and activate the virtual environment first:
 
 ```bash
-# Activate venv in every new terminal you open:
-# Mac/Linux:  source venv/bin/activate
-# Windows:    venv\Scripts\activate
+cd mlpipeline
+source venv/bin/activate    # Mac/Linux
+venv\Scripts\activate       # Windows CMD
 ```
+
+Also make sure all environment variables are set in **each terminal**
+(AWS credentials + S3_BUCKET + PREFECT_API_KEY + PREFECT_API_URL).
 
 ---
 
 ### Terminal 1 — Start MLflow server
 
 ```bash
-cd mlpipeline
-source venv/bin/activate    # (or venv\Scripts\activate on Windows)
-
 mlflow server \
   --backend-store-uri sqlite:///mlflow.db \
   --default-artifact-root s3://$S3_BUCKET/mlflow-artifacts \
@@ -1376,237 +1253,263 @@ mlflow server \
   --port 5000
 ```
 
-Leave this running. Open http://localhost:5000 in your browser — you should see the MLflow UI.
+**Windows CMD:**
+```cmd
+mlflow server --backend-store-uri sqlite:///mlflow.db --default-artifact-root s3://%S3_BUCKET%/mlflow-artifacts --host 127.0.0.1 --port 5000
+```
+
+Keep this running. Open **http://localhost:5000** — MLflow UI loads.
 
 ---
 
-### Terminal 2 — Run the ML pipeline (one time)
+### Terminal 2 — Run the ML pipeline (one time only)
 
 ```bash
-cd mlpipeline
-source venv/bin/activate
-
 python ml/ml_pipeline.py
 ```
 
-Wait for it to finish. You will see both models train with all metrics printed.
-Then go to http://localhost:5000 → **Experiments** → `Titanic_Survival_Prediction` — both model runs will appear.
+Wait until it finishes. Both models train and all metrics are logged.
+Then open **http://localhost:5000** → Experiments → `Titanic_Survival_Prediction`
+— both runs appear. **Take your MLflow screenshots now.**
 
 ---
 
-### Terminal 3 — Register deployment + start Prefect worker
+### Terminal 3 — Register deployment then start Prefect worker
 
-Run these two commands in order in the same terminal:
+Run these two commands **in sequence** in the same terminal:
 
 ```bash
-cd mlpipeline
-source venv/bin/activate
-
-# Step A: Register the deployment and schedule on Prefect Cloud
+# A: Register the deployment and schedule on Prefect Cloud (run once)
 python flows/data_pipeline.py
+
 # Expected output:
 # ✅ Deployment registered on Prefect Cloud!
-#    ID       : xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 #    Schedule : Every 3 minutes  (*/3 * * * *)
-#    Pool     : local-work-pool
+#    View at  : https://app.prefect.cloud → Deployments
 
-# Step B: Start the worker (keep this running — it executes the scheduled flows)
+# B: Start the worker — leave this running permanently
 prefect worker start --pool "local-work-pool"
+
 # Expected output:
 # Worker 'ProcessWorker ...' started!
 # Looking for scheduled flow runs...
 ```
 
-Leave the worker running. Every 3 minutes it will pick up a scheduled run from Prefect Cloud and execute the flow.
-
-Go to **https://app.prefect.cloud** → **Deployments** — you should see `titanic-pipeline-every-3min` with schedule active.
+Keep the worker running. Go to **https://app.prefect.cloud** → Deployments
+— you will see `titanic-pipeline-every-3min` with an active cron schedule.
 
 ---
 
 ### Terminal 4 — Start FastAPI
 
 ```bash
-cd mlpipeline
-source venv/bin/activate
-
 uvicorn api.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-Open http://localhost:8000/docs in your browser — the Swagger UI shows all API endpoints.
+Open **http://localhost:8000/docs** — Swagger UI loads with all endpoints.
 
 ---
 
-### Trigger a manual run immediately (don't wait 3 minutes)
+### Trigger a manual run immediately
 
-Open a 5th terminal:
+Open a 5th terminal (venv active, env vars set):
+
 ```bash
-cd mlpipeline
-source venv/bin/activate
-
 prefect deployment run "titanic-data-pipeline/titanic-pipeline-every-3min"
 ```
 
-Watch it run live at https://app.prefect.cloud → **Flow Runs**.
+Watch it execute live at **https://app.prefect.cloud → Flow Runs**.
+The run will show all 3 tasks completing in sequence.
+Click into any task to see the detailed logs.
 
 ---
 
-### All 4 services running — summary
+### Download EDA plots from S3 for your report
 
-| Terminal | Command | URL |
-|---|---|---|
-| 1 | MLflow server | http://localhost:5000 |
-| 2 | ML pipeline (run once) | — |
-| 3 | Prefect worker | https://app.prefect.cloud |
-| 4 | FastAPI | http://localhost:8000/docs |
-
----
-
-### Download EDA plots from S3
-
-After the first pipeline run completes, download the plots to include in your report:
+After the first pipeline run completes:
 
 ```bash
 # Mac/Linux
 aws s3 cp s3://$S3_BUCKET/plots/ ./plots/ --recursive
 ls plots/
-# 1_correlation_heatmap.png
-# 2_univariate_analysis.png
-# 3_bivariate_sex_pclass.png
-# 4_age_distribution_survival.png
-# 5_feature_importance.png
 
-# Windows (PowerShell)
-aws s3 cp s3://$env:S3_BUCKET/plots/ .\plots\ --recursive
+# Windows CMD
+aws s3 cp s3://%S3_BUCKET%/plots/ .\plots\ --recursive
+dir plots\
 ```
+
+You will get 5 PNG files — paste all of them into your Word doc.
 
 ---
 
-### Useful commands
+### All services at a glance
+
+| Terminal | What's running | URL |
+|---|---|---|
+| 1 | MLflow server | http://localhost:5000 |
+| 2 | ML pipeline (done) | — |
+| 3 | Prefect worker | https://app.prefect.cloud |
+| 4 | FastAPI | http://localhost:8000/docs |
+
+---
+
+### Quick reference commands
 
 ```bash
-# ── Prefect CLI ───────────────────────────────────────────────────────────────
-prefect deployment ls                  # List all deployments
-prefect flow-run ls                    # List recent flow runs
-prefect work-pool ls                   # List work pools
-
-# Manually trigger a run
+# Trigger a manual Prefect run
 prefect deployment run "titanic-data-pipeline/titanic-pipeline-every-3min"
 
-# ── S3 ────────────────────────────────────────────────────────────────────────
-aws s3 ls s3://$S3_BUCKET/ --recursive          # List all files
-aws s3 ls s3://$S3_BUCKET/plots/                # List EDA plots
-aws s3 ls s3://$S3_BUCKET/mlflow-artifacts/     # List model artifacts
+# List deployments
+prefect deployment ls
 
-# ── Check env vars are set correctly ─────────────────────────────────────────
-echo $S3_BUCKET
-echo $PREFECT_API_KEY
-echo $MLFLOW_TRACKING_URI
+# List recent flow runs
+prefect flow-run ls
+
+# Check S3 contents
+aws s3 ls s3://$S3_BUCKET/ --recursive
+
+# Test API endpoints
+curl http://localhost:8000/health
+curl http://localhost:8000/prefect/deployments
+curl http://localhost:8000/mlflow/experiment
 ```
 
 ---
 
-## 12. Screenshots Guide
+## 13. Refresh Expired Credentials
 
-Take these 20 screenshots for your submission document.
+When credentials expire (~12 hours) you will see `ExpiredTokenException` errors.
+**Do not redo any other steps** — just refresh the credentials.
 
-| # | Screenshot | Where to capture it |
-|---|---|---|
-| 1 | **Prefect Cloud — Deployments page** showing `titanic-pipeline-every-3min` with `*/3 * * * *` | `app.prefect.cloud` → Deployments |
-| 2 | **Prefect Cloud — Deployment detail** showing schedule, work pool, tags | Click the deployment name |
-| 3 | **Prefect Cloud — Flow Runs list** showing multiple completed runs (green) | Prefect Cloud → Flow Runs |
-| 4 | **Prefect Cloud — Single flow run** showing 3 task bubbles in sequence | Click any completed run |
-| 5 | **Prefect Cloud — Ingestion task logs** showing rows, columns, dtypes | Click run → click Ingestion task → Logs tab |
-| 6 | **Prefect Cloud — Preprocessing task logs** showing imputation and normalization | Click Preprocessing task → Logs |
-| 7 | **Prefect Cloud — EDA task logs** showing correlation matrix and feature importance | Click EDA task → Logs |
-| 8 | **Prefect Cloud — Work Pools** showing `local-work-pool` as READY | Prefect Cloud → Work Pools |
-| 9 | **AWS S3 Bucket** showing `data/`, `plots/`, `mlflow-artifacts/` folders | AWS Console → S3 → your bucket |
-| 10 | **S3 plots folder** showing all 5 PNG files | S3 → click plots/ folder |
-| 11 | **All 5 EDA plots** (download from S3, paste all 5 into doc) | Downloaded to your `plots/` folder |
-| 12 | **MLflow Experiments page** showing `Titanic_Survival_Prediction` | http://localhost:5000 |
-| 13 | **MLflow Runs table** showing both model runs | MLflow → Experiments → click experiment |
-| 14 | **MLflow Compare view** — both models side by side | Select both runs → Compare |
-| 15 | **MLflow — Random Forest run detail** showing all 8+ metrics | Click RF run |
-| 16 | **MLflow — Logistic Regression run detail** showing all 8+ metrics | Click LR run |
-| 17 | **MLflow — Artifacts panel** showing model files saved to S3 | Any run → Artifacts tab |
-| 18 | **FastAPI Swagger UI** (`/docs`) showing all endpoints grouped by tag | http://localhost:8000/docs |
-| 19 | **`GET /prefect/deployments`** — executed in Swagger showing cron schedule in JSON response | Swagger → expand → Try it out → Execute |
-| 20 | **`GET /mlflow/experiment`** — executed in Swagger showing both models and metrics | Swagger → expand → Try it out → Execute |
+1. Open **AWS CloudShell** in your browser
+2. Run:
+   ```bash
+   aws sts get-session-token --duration-seconds 43200
+   ```
+3. Copy the new `AccessKeyId`, `SecretAccessKey`, `SessionToken`
+4. In **every open terminal** on your local machine, paste:
+
+   **Mac/Linux:**
+   ```bash
+   export AWS_ACCESS_KEY_ID="ASIA3...new key..."
+   export AWS_SECRET_ACCESS_KEY="...new secret..."
+   export AWS_SESSION_TOKEN="...new token..."
+   ```
+
+   **Windows CMD:**
+   ```cmd
+   set AWS_ACCESS_KEY_ID=ASIA3...new key...
+   set AWS_SECRET_ACCESS_KEY=...new secret...
+   set AWS_SESSION_TOKEN=...new token...
+   ```
+
+5. Restart the MLflow server and FastAPI (Ctrl+C then rerun the commands)
+6. The Prefect worker reconnects automatically
 
 ---
 
-## 13. Mark Breakdown
+## 14. Screenshots Guide
+
+| # | Screenshot | Where |
+|---|---|---|
+| 1 | **Prefect Cloud — Deployments** showing `titanic-pipeline-every-3min` with `*/3 * * * *` | `app.prefect.cloud` → Deployments |
+| 2 | **Prefect Cloud — Deployment detail** showing schedule, work pool, tags | Click the deployment name |
+| 3 | **Prefect Cloud — Flow Runs list** multiple completed runs (green ticks) | Prefect Cloud → Flow Runs |
+| 4 | **Prefect Cloud — Single flow run** showing 3 task boxes in sequence | Click any completed run |
+| 5 | **Prefect Cloud — Ingestion task logs** rows, columns, dtypes | Click run → Ingestion task → Logs |
+| 6 | **Prefect Cloud — Preprocessing task logs** imputation and normalization | Click Preprocessing task → Logs |
+| 7 | **Prefect Cloud — EDA task logs** correlation matrix, feature importance | Click EDA task → Logs |
+| 8 | **Prefect Cloud — Work Pools** showing `local-work-pool` READY | Prefect Cloud → Work Pools |
+| 9 | **AWS S3 Bucket** showing all 3 folders | AWS Console → S3 |
+| 10 | **S3 plots folder** showing 5 PNG files | S3 → plots/ |
+| 11 | **All 5 EDA plots** (downloaded, pasted into doc) | Your local `plots/` folder |
+| 12 | **MLflow Experiments page** | http://localhost:5000 |
+| 13 | **MLflow Runs table** both models visible | MLflow → click experiment |
+| 14 | **MLflow Compare view** both models side by side | Select both runs → Compare |
+| 15 | **MLflow — Random Forest run** all 8+ metrics | Click RF run |
+| 16 | **MLflow — Logistic Regression run** all 8+ metrics | Click LR run |
+| 17 | **MLflow — Artifacts panel** model files in S3 | Any run → Artifacts tab |
+| 18 | **FastAPI Swagger UI** all endpoints grouped by tag | http://localhost:8000/docs |
+| 19 | **`GET /prefect/deployments`** JSON response in Swagger showing cron | Swagger → Try it out → Execute |
+| 20 | **`GET /mlflow/experiment`** JSON showing both models and metrics | Swagger → Try it out → Execute |
+
+---
+
+## 15. Mark Breakdown
 
 | Requirement | Marks | Delivered By |
 |---|---|---|
-| **1.1 Business Understanding** | ✅ | Titanic survival prediction — binary classification |
-| **1.2 Data Ingestion** | ✅ | `ingest_data()` @task — reads from S3, logs shape, dtypes, columns, missing count |
-| **1.3 Data Preprocessing** | ✅ | `preprocess_data()` @task — summary stats, missing values, median imputation, MinMax normalization |
-| **1.4 EDA** | ✅ | `perform_eda()` @task — correlation matrix, encoding, binning, feature importance, 5 plots → S3 |
-| **1.5 DataOps** | ✅ | Prefect Cloud deployment with `*/3 * * * *` cron, real hosted cloud dashboard, live logs |
-| **2.1 Model Preparation** | ✅ | Random Forest + Logistic Regression identified and configured |
-| **2.2 Model Training** | ✅ | Stratified 70/30 split, 5-fold cross-validation |
-| **2.3 Model Evaluation** | ✅ | Accuracy, confusion matrix, full classification report |
-| **2.4 MLOps Monitoring** | ✅ | MLflow: 8 metrics (accuracy, precision, recall, F1, ROC-AUC, CV, specificity + TP/FP/FN/TN) |
-| **3.1 Built-in APIs** | ✅ | Prefect Cloud REST API (flows, deployments, flow-runs) + MLflow tracking API |
-| **3.2 Display Details** | ✅ | 6 FastAPI endpoints with complete JSON responses visible in Swagger |
-| **Submission doc + video** | ✅ | 20 screenshots above + screen-record all 4 UIs |
-| **Cloud deployment** | ✅ | Prefect Cloud (hosted), S3 (AWS) — cloud components verified |
+| **1.1 Business Understanding** | ✅ | Titanic survival prediction — binary classification problem |
+| **1.2 Data Ingestion** | ✅ | `ingest_data()` — S3 read, logs shape, dtypes, columns, missing count |
+| **1.3 Data Preprocessing** | ✅ | `preprocess_data()` — summary stats, missing check, median imputation, MinMax normalization |
+| **1.4 EDA** | ✅ | `perform_eda()` — correlation matrix, encoding, binning, feature importance, 5 plots → S3 |
+| **1.5 DataOps** | ✅ | Prefect Cloud deployment, `*/3 * * * *` cron, real hosted cloud dashboard |
+| **2.1 Model Preparation** | ✅ | Random Forest + Logistic Regression |
+| **2.2 Model Training** | ✅ | Stratified 70/30 split + 5-fold cross-validation |
+| **2.3 Model Evaluation** | ✅ | Accuracy, confusion matrix, classification report |
+| **2.4 MLOps Monitoring** | ✅ | MLflow: 8 metrics logged (accuracy, precision, recall, F1, ROC-AUC, CV, specificity, TP/FP/FN/TN) |
+| **3.1 Built-in APIs** | ✅ | Prefect Cloud REST API + MLflow tracking API |
+| **3.2 Display Details** | ✅ | 6 FastAPI endpoints with complete JSON responses |
+| **Submission doc + video** | ✅ | 20 screenshots + screen-record all UIs |
+| **Cloud deployment** | ✅ | Prefect Cloud (hosted) + AWS S3 (storage) — both genuinely cloud |
 
 ---
 
-## 14. Troubleshooting
+## 16. Troubleshooting
+
+**`ExpiredTokenException` on any AWS call:**
+→ Go to Section 13 — refresh credentials from CloudShell. Takes 2 minutes.
+
+**`NoCredentialsError` or `Unable to locate credentials`:**
+```bash
+# Check env vars are actually set
+echo $AWS_ACCESS_KEY_ID        # Mac/Linux
+echo %AWS_ACCESS_KEY_ID%       # Windows CMD
+echo $env:AWS_ACCESS_KEY_ID    # Windows PowerShell
+# If blank → paste the export/set commands again from Section 4
+```
 
 **`prefect cloud login` fails:**
 ```bash
-# Make sure PREFECT_API_KEY is set
-echo $PREFECT_API_KEY    # Should print your key
-# Try passing key directly
+echo $PREFECT_API_KEY    # Must not be blank
 prefect cloud login --key "pnu_yourkey"
 ```
 
-**S3 access denied / no credentials:**
+**MLflow can't write model artifacts to S3:**
 ```bash
-# Verify credentials are configured
-aws sts get-caller-identity
-# If this fails, re-run: aws configure
-```
-
-**MLflow can't write to S3:**
-```bash
-# Test S3 write access
+# Test S3 write from your local terminal
 aws s3 cp README.md s3://$S3_BUCKET/test.txt
-aws s3 rm s3://$S3_BUCKET/test.txt
-# If this works, MLflow will too
-```
-
-**`ModuleNotFoundError` for any package:**
-```bash
-# Make sure venv is active (you should see (venv) in terminal prompt)
-pip install --upgrade <package-name>
+# If this fails, credentials are expired — go to Section 13
 ```
 
 **Prefect worker shows no runs after 3 minutes:**
 ```bash
-# Make sure the deployment schedule is active
+# Check deployment schedule is active
 prefect deployment ls
-# If PAUSED, resume it:
+# If PAUSED:
 prefect deployment resume "titanic-data-pipeline/titanic-pipeline-every-3min"
-
-# Or just trigger manually
+# Or trigger manually:
 prefect deployment run "titanic-data-pipeline/titanic-pipeline-every-3min"
 ```
 
-**FastAPI returns 503 for Prefect endpoints:**
+**FastAPI returns 503 on Prefect endpoints:**
 ```bash
-# PREFECT_API_URL is not set — verify in terminal
-echo $PREFECT_API_URL
-# Should print the full URL. If blank, set it again and restart uvicorn.
+echo $PREFECT_API_URL    # Must not be blank
+# If blank — set it again and restart uvicorn
 ```
 
-**Plots not showing in S3 after EDA task completes:**
+**`ModuleNotFoundError` for any package:**
+```bash
+# Make sure (venv) is showing in your terminal prompt
+# If not: source venv/bin/activate  (or venv\Scripts\activate)
+pip install <missing-package>
+```
+
+**Plots not appearing in S3 after EDA task runs:**
 ```bash
 aws s3 ls s3://$S3_BUCKET/plots/
-# If empty, check Prefect Cloud task logs for any Python errors
+# If empty — check Prefect Cloud task logs for the error
+# Most likely cause: S3 credentials expired mid-run
 ```
 
 ---
