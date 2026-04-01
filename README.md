@@ -139,10 +139,10 @@ curl http://127.0.0.1:8000/pipeline-status
 ## 5. `requirements.txt`
 
 ```text
-prefect==2.19.9
+prefect>=3.0.0
 mlflow==2.13.0
 fastapi==0.111.0
-uvicorn==0.29.0
+uvicorn>=0.30.1
 pandas==2.2.2
 scikit-learn==1.4.2
 matplotlib==3.9.0
